@@ -58,7 +58,7 @@ def sfs(L):
         return 1.0 * v
     A = sf.asm(bilinf, basis)
     f = sf.asm(linf, basis)
-    D = sf.basis.get_dofs("left")
+    D = basis.get_dofs("left")
     x = sf.solve(*sf.condense(A, f, D=D))
     uc=f'sf@{L}'
     sns=types.SimpleNamespace(
@@ -96,4 +96,7 @@ def plot(L):
 # %% solve
 for L in (0.1,0.2,1,2):
     bvp(L)
+    sfs(L)
     plot(L)
+# %% debug
+sfs(1)
