@@ -63,6 +63,11 @@ def sfs(L):
     uc=f'sf@{L}'
     sns=types.SimpleNamespace(
         x=x,
+        m=m,
+        e=e,
+        basis=basis,
+        A=A,
+        f=f,
         )
     res[uc]=sns
 def plot(L):
