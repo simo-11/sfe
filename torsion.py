@@ -6,7 +6,9 @@ Created on Sun Feb 15 18:33:14 2026
 """
 import numpy as np
 from scipy.integrate import solve_bvp
+import skfem as sf
 import matplotlib.pyplot as plt
+import types
 # %% Parameters
 E = 1e9
 nu = 0.3
@@ -42,6 +44,27 @@ def bvp(L):
     y_init = np.zeros((4, x.size))
     uc=f'bvp@{L}'
     res[uc]=solve_bvp(bvp_fun, bvp_bc, x, y_init)
+def sfs(L):
+    m = sf.MeshLine().refined(3).with_boundaries(
+        {"left": lambda x: x[0] == 0})
+    e = sf.ElementLineHermite()
+    basis = sf.Basis(m, e)
+    @sf.BilinearForm
+    def bilinf(u, v, w):
+        from skfem.helpers import dd, ddot
+        return ddot(dd(u), dd(v))
+    @sf.LinearForm
+    def linf(v, w):
+        return 1.0 * v
+    A = sf.asm(bilinf, basis)
+    f = sf.asm(linf, basis)
+    D = sf.basis.get_dofs("left")
+    x = sf.solve(*sf.condense(A, f, D=D))
+    uc=f'sf@{L}'
+    sns=types.SimpleNamespace(
+        x=x,
+        )
+    res[uc]=sns
 def plot(L):
     fig,axes=plt.subplot_mosaic(
     [
