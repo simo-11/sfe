@@ -31,4 +31,7 @@ boundary_facets = mesh.facets_satisfying(
 D = basis.get_dofs(facets=boundary_facets)
 A, b = sf.enforce(A, b,D=D.nodal['u'][[0]])
 S = sf.solve(A, b)
-ax=sfplot.plot3(basis, S, shading='gouraud')
+# using larger nref will create smoother plot
+# preinitialized ax can be given as a parameter
+# cmap can be given as parameter
+ax=sfplot.plot3(basis, S, nref=1,shading='gouraud')
