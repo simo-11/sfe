@@ -1,5 +1,6 @@
 # sfe
-[scikit-fem](https://github.com/kinnala/scikit-fem) examples
+[scikit-fem](https://github.com/kinnala/scikit-fem) examples, scikit-fem is a library for performing finite element assembly 
+which provides also for solving small systems
 
 # Installations
 
@@ -38,10 +39,12 @@ Working directory (right upper corner) github/sfe
 
 Dependencies can be installed using pip
  * spyder-kernels - needed for spyder integration
+ * scikit-fem - main target for this repo, requires numpy and scipy [all] also brings also matplotlib
+ * pyvistaqt pyqt5 - requires pyvista and qtpy
 
 Typical command needed after update of python is (uv in front if it is used)
 ```
-uv pip install spyder-kernels==3.1.* scikit-fem[all]
+uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5
 ```
 
 ## Using sfe
