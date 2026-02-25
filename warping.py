@@ -11,6 +11,50 @@ import matplotlib.pyplot as pyplot
 import math
 import types
 import pyvista as pv
+from pyvistaqt import BackgroundPlotter
+import matplotlib.pyplot as plt
+import matplotlib.colors as plt_colors
+
+plotter = BackgroundPlotter()
+
+def qtplot(uc, m: sf.mesh.Mesh,z:np.ndarray,
+           scale=None, **kwargs):
+    # Apply scaled displacement to mesh
+    if scale==None:
+        x_range = max(m.p[0])-min(m.p[0])
+        y_range = max(m.p[1])-min(m.p[1])
+        max_dim = max(x_range, y_range)
+        max_disp = max(z.max(),-z.min())
+        # Autoscale: max displacement = 10% of largest model dimension
+        target_disp = 0.1 * max_dim
+        scale = target_disp / max_disp if max_disp > 0 else 1.0
+    # Create a diverging colormap centered at zero
+    cmap = plt.get_cmap("coolwarm")  # or "seismic", "RdBu", "PiYG", etc.
+    vmin=z.min()
+    vmax=z.max()
+    if vmin<0 and vmax>0:
+        # Normalize so that zero is white
+        norm = plt_colors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
+    else:
+        norm = plt_colors.Normalize(vmin=vmin, vmax=vmax)
+    colors = cmap(norm(z))[:, :3]  # Drop alpha channel
+    # Launch interactive non-blocking window
+    x=m.p[0]
+    y=m.p[1]
+    triangles=m.t.T
+    sz=scale*z
+    points = np.column_stack([x, y, sz])
+    faces = np.hstack(
+        [np.c_[np.full(len(triangles), 3), triangles]]).astype(np.int32)
+    mesh = pv.PolyData(points,faces)
+    plotter.add_mesh(mesh,
+                     scalars=colors,rgb=True,
+                     scalar_bar_args={"title": f"Warping for {uc.name}"},
+                     show_edges=True)
+    plotter.add_text(f"""{uc.name} {mesh.n_points} points
+scale={scale:.3g}, max warping={max_disp:.3G}
+""", font_size=12)
+    return (plotter,scale)
 
 def solve(mesh: sf.mesh.Mesh, elem: sf.element.Element):
     basis = sf.Basis(mesh, sf.ElementTriP2())
@@ -75,13 +119,6 @@ for uc in ucs:
                          triangles=triangles,
                          cmap='coolwarm')
     pyplot.pause(0.01)
-    points = np.column_stack([x, y, z])
-    faces = np.hstack(
-        [np.c_[np.full(len(triangles), 3), triangles]]).astype(np.int32)
-    mesh = pv.PolyData(points,faces)
-    mesh = mesh.delaunay_2d()
-    plotter = pv.Plotter()
-    plotter.add_mesh(mesh, cmap="coolwarm")
-    plotter.show()
+    qtplot(uc,m,z)
 pyplot.tight_layout()
 pyplot.show()
