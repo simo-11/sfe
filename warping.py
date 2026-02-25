@@ -7,9 +7,10 @@ and knowledge on the correct solution.
 import numpy as np
 import skfem as sf
 from skfem.models.poisson import laplace
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as pyplot
 import math
-from types import SimpleNamespace
+import types
+import pyvista as pv
 
 def solve(mesh: sf.mesh.Mesh, elem: sf.element.Element):
     basis = sf.Basis(mesh, sf.ElementTriP2())
@@ -35,8 +36,8 @@ mesh = sf.MeshTri.init_tensor(
     np.linspace(-0.05, 0.05, 20)
 )
 ucs=[
-     SimpleNamespace(elem=sf.ElementTriP2()),
-     SimpleNamespace(elem=sf.ElementTriP1()),
+     types.SimpleNamespace(elem=sf.ElementTriP2()),
+     types.SimpleNamespace(elem=sf.ElementTriP1()),
      ]
 names=[]
 for uc in ucs:
@@ -51,7 +52,7 @@ for r in range(rows):
         row.append(names[idx] if idx < len(names) else ".")
         idx += 1
     mosaic.append(row)
-fig = plt.figure(num='warping using skfem',clear=True)
+fig = pyplot.figure(num='warping using skfem',clear=True)
 axes = {}
 for r, row in enumerate(mosaic):
     for c, key in enumerate(row):
@@ -67,9 +68,20 @@ for uc in ucs:
     # using larger nref will create smoother plot
     # sfplot.plot3(basis, S, nref=1,shading='gouraud')
     (m,z)=uc.basis.refinterp(uc.S,nrefs=1)
-    ax.plot_trisurf(m.p[0], m.p[1], z,
-                         triangles=m.t.T,
-                         shading='gouraud')
-    plt.pause(0.01)
-plt.tight_layout()
-plt.show()
+    x=m.p[0]
+    y=m.p[1]
+    triangles=m.t.T
+    ax.plot_trisurf(x, y, z,
+                         triangles=triangles,
+                         cmap='coolwarm')
+    pyplot.pause(0.01)
+    points = np.column_stack([x, y, z])
+    faces = np.hstack(
+        [np.c_[np.full(len(triangles), 3), triangles]]).astype(np.int32)
+    mesh = pv.PolyData(points,faces)
+    mesh = mesh.delaunay_2d()
+    plotter = pv.Plotter()
+    plotter.add_mesh(mesh, cmap="coolwarm")
+    plotter.show()
+pyplot.tight_layout()
+pyplot.show()
