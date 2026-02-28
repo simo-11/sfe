@@ -34,6 +34,8 @@ PS C:\> winget install -e --id Spyder.Spyder
 ```
 Tools/Preferences/Python interpreter github/sfe/.venv/Scripts/python.exe
 Working directory (right upper corner) github/sfe
+Run configuration per file, Custom configuration, Advanced settings: Run in console's namescape instead of and empty one
+for all used ones at least Debugger and IPython
 
 ## Python packages
 
