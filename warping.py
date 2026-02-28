@@ -10,23 +10,37 @@ from skfem.models.poisson import laplace
 import matplotlib.pyplot as pyplot
 import math
 import types
+import logging
 import pyvista as pv
-from pyvistaqt import BackgroundPlotter
+import pyvistaqt
 import matplotlib.pyplot as plt
 import matplotlib.colors as plt_colors
 
-plotter = BackgroundPlotter()
+def tsplot(uc,m: sf.mesh.Mesh,z:np.ndarray):
+    ax=uc.ax
+    ax.set_title(uc.name)
+    ax.axis("equal")
+    x=m.p[0]
+    y=m.p[1]
+    triangles=m.t.T
+    ax.plot_trisurf(x, y, z,
+                         triangles=triangles,
+                         cmap='coolwarm')
+    pyplot.pause(0.01)
 
 def qtplot(uc, m: sf.mesh.Mesh,z:np.ndarray,
            scale=None, **kwargs):
     # Apply scaled displacement to mesh
-    if scale==None:
+    if scale==None or scale<0:
         x_range = max(m.p[0])-min(m.p[0])
         y_range = max(m.p[1])-min(m.p[1])
         max_dim = max(x_range, y_range)
         max_disp = max(z.max(),-z.min())
-        # Autoscale: max displacement = 10% of largest model dimension
-        target_disp = 0.1 * max_dim
+        if scale==None:
+            scaler=0.1
+        else:
+            scaler=-scale
+        target_disp = scaler * max_dim
         scale = target_disp / max_disp if max_disp > 0 else 1.0
     # Create a diverging colormap centered at zero
     cmap = plt.get_cmap("coolwarm")  # or "seismic", "RdBu", "PiYG", etc.
@@ -38,23 +52,35 @@ def qtplot(uc, m: sf.mesh.Mesh,z:np.ndarray,
     else:
         norm = plt_colors.Normalize(vmin=vmin, vmax=vmax)
     colors = cmap(norm(z))[:, :3]  # Drop alpha channel
-    # Launch interactive non-blocking window
+    triangles=m.t.T
     x=m.p[0]
     y=m.p[1]
-    triangles=m.t.T
     sz=scale*z
     points = np.column_stack([x, y, sz])
     faces = np.hstack(
         [np.c_[np.full(len(triangles), 3), triangles]]).astype(np.int32)
     mesh = pv.PolyData(points,faces)
-    plotter.add_mesh(mesh,
+    try:
+        uc.mp.clear()
+    except AttributeError as e:
+        logging.debug(f"First run {e}")
+    uc.mp.add_mesh(mesh,
                      scalars=colors,rgb=True,
                      scalar_bar_args={"title": f"Warping for {uc.name}"},
                      show_edges=True)
-    plotter.add_text(f"""{uc.name} {mesh.n_points} points
+    uc.mp.show_bounds(
+        grid='back',
+        location='outer',
+        ticks='both',
+        xtitle='X',
+        ytitle='Y',
+        ztitle='warping'
+    )
+    uc.mp.add_text(f"""{uc.name} {mesh.n_points} points
 scale={scale:.3g}, max warping={max_disp:.3G}
 """, font_size=12)
-    return (plotter,scale)
+    uc.mp.render()
+    return (scale)
 
 def solve(mesh: sf.mesh.Mesh, elem: sf.element.Element):
     basis = sf.Basis(mesh, sf.ElementTriP2())
@@ -83,42 +109,26 @@ ucs=[
      types.SimpleNamespace(elem=sf.ElementTriP2()),
      types.SimpleNamespace(elem=sf.ElementTriP1()),
      ]
-names=[]
+rows = math.ceil(len(ucs) / 2)
+if not "mp" in globals():
+    mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=2)
+if mp._nrows != rows:
+    mp.close()
+    mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=2)
+fig = pyplot.figure(num='warping using skfem',clear=True)
+pyplot.tight_layout()
+r=0
+c=0
 for uc in ucs:
     uc.name=type(uc.elem).__name__.split('Element')[-1]
-    names.append(uc.name)
-rows = math.ceil(len(names) / 2)
-mosaic = []
-idx = 0
-for r in range(rows):
-    row = []
-    for c in range(2):
-        row.append(names[idx] if idx < len(names) else ".")
-        idx += 1
-    mosaic.append(row)
-fig = pyplot.figure(num='warping using skfem',clear=True)
-axes = {}
-for r, row in enumerate(mosaic):
-    for c, key in enumerate(row):
-        if key == ".":
-            continue
-        ax = fig.add_subplot(rows, 2, r * 2 + c + 1, projection="3d")
-        axes[key] = ax
-for uc in ucs:
+    uc.ax=fig.add_subplot(rows, 2, r * 2 + c + 1, projection="3d")
+    uc.mp=mp[r,c]
+    if c==1:
+        c=0
+        r=r+1
+    else:
+        c=1
     (uc.S,uc.basis)=solve(mesh,uc.elem)
-    ax=axes[uc.name]
-    ax.set_title(uc.name)
-    ax.axis("equal")
-    # using larger nref will create smoother plot
-    # sfplot.plot3(basis, S, nref=1,shading='gouraud')
     (m,z)=uc.basis.refinterp(uc.S,nrefs=1)
-    x=m.p[0]
-    y=m.p[1]
-    triangles=m.t.T
-    ax.plot_trisurf(x, y, z,
-                         triangles=triangles,
-                         cmap='coolwarm')
-    pyplot.pause(0.01)
-    qtplot(uc,m,z)
-pyplot.tight_layout()
-pyplot.show()
+    tsplot(uc,m,z)
+    qtplot(uc,m,z,scale=-0.3)
