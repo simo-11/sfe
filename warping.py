@@ -1,14 +1,25 @@
 # -*- coding: utf-8 -*-
 """
 Created on Thu Feb 19 19:49:39 2026
-@author: simon with help of Copilot, reading the code
-and knowledge on the correct solution.
+@author: Simo
+Assisted by Microsoft Copilot
+
+Provides framework for testing various elements and processes for
+solution of warping function and cross section properties.
+
+TODO:
+    scale to shear center
+    calculate section properties
+    support for at least U and RSH with rounded corners
+
+For a ready solution see https://sectionproperties.readthedocs.io/
 """
 import numpy as np
 import skfem as sf
 from skfem.models.poisson import laplace
 import matplotlib.pyplot as pyplot
 import math
+import enum
 import types
 import logging
 import pyvista as pv
@@ -101,34 +112,83 @@ def solve(mesh: sf.mesh.Mesh, elem: sf.element.Element):
     A, b = sf.enforce(A, b,D=D.nodal['u'][[0]])
     S = sf.solve(A, b)
     return (S,basis)
-mesh = sf.MeshTri.init_tensor(
-    np.linspace(-0.05, 0.05, 20),
-    np.linspace(-0.05, 0.05, 20)
-)
-ucs=[
-     types.SimpleNamespace(elem=sf.ElementTriP2()),
-     types.SimpleNamespace(elem=sf.ElementTriP1()),
-     ]
-rows = math.ceil(len(ucs) / 2)
-if not "mp" in globals():
-    mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=2)
-if mp._nrows != rows:
-    mp.close()
-    mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=2)
-fig = pyplot.figure(num='warping using skfem',clear=True)
-pyplot.tight_layout()
-r=0
-c=0
-for uc in ucs:
-    uc.name=type(uc.elem).__name__.split('Element')[-1]
-    uc.ax=fig.add_subplot(rows, 2, r * 2 + c + 1, projection="3d")
-    uc.mp=mp[r,c]
-    if c==1:
-        c=0
-        r=r+1
-    else:
-        c=1
-    (uc.S,uc.basis)=solve(mesh,uc.elem)
-    (m,z)=uc.basis.refinterp(uc.S,nrefs=1)
-    tsplot(uc,m,z)
-    qtplot(uc,m,z,scale=-0.3)
+class Model(enum.Enum):
+    SQUARE=1
+    RECTANGLE=2
+model=Model.RECTANGLE
+do_tsplot=False
+do_qtplot=False
+mesh_scale=100
+if not do_tsplot:
+    plt.close('all')
+if not do_qtplot:
+    if "mp" in globals():
+        mp=globals()["mp"]
+        mp.close()
+        del(mp)
+for nc in range(3,14,2):
+    match model:
+        case Model.SQUARE:
+            x_nodes=nc
+            y_nodes=nc
+            qtplot_scale=-0.3
+            mesh = sf.MeshTri.init_tensor(
+                mesh_scale*np.linspace(-0.05, 0.05, x_nodes),
+                mesh_scale*np.linspace(-0.05, 0.05, y_nodes)
+            )
+        case Model.RECTANGLE:
+            x_nodes=nc
+            y_nodes=nc
+            qtplot_scale=-0.1
+            mesh_scale=1000
+            mesh = sf.MeshTri.init_tensor(
+                mesh_scale*np.linspace(-0.05, 0.05, x_nodes),
+                mesh_scale*np.linspace(-0.005, 0.005, y_nodes)
+            )
+        case _:
+            raise ValueError(f"model {model} is not supported")
+    print(f'Model={model}, nvertices={mesh.nvertices}')
+    ucs=[
+    #     types.SimpleNamespace(elem=sf.ElementTriN1()),
+    #     types.SimpleNamespace(elem=sf.ElementTriN2()),
+    #     types.SimpleNamespace(elem=sf.ElementTriN3()),
+         types.SimpleNamespace(elem=sf.ElementTriP0()),
+    #     types.SimpleNamespace(elem=sf.ElementTriP1()),
+    #     types.SimpleNamespace(elem=sf.ElementTriP1B()),
+    #    types.SimpleNamespace(elem=sf.ElementTriP1G()),
+         types.SimpleNamespace(elem=sf.ElementTriP2()),
+    #     types.SimpleNamespace(elem=sf.ElementTriP2B()),
+    #     types.SimpleNamespace(elem=sf.ElementTriP2G()),
+    #     types.SimpleNamespace(elem=sf.ElementTriP3()),
+    #    types.SimpleNamespace(elem=sf.ElementTriP4()),
+         ]
+    rows = math.ceil(len(ucs) / 2)
+    if do_qtplot:
+        if not "mp" in globals():
+            mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=2)
+        if mp._nrows != rows:
+            mp.close()
+            mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=2)
+    if do_tsplot:
+        fig = pyplot.figure(num='warping using skfem',clear=True)
+        pyplot.tight_layout()
+    r=0
+    c=0
+    for uc in ucs:
+        uc.name=type(uc.elem).__name__.split('Element')[-1]
+        if do_tsplot:
+            uc.ax=fig.add_subplot(rows, 2, r * 2 + c + 1, projection="3d")
+        if do_qtplot:
+            uc.mp=mp[r,c]
+        if c==1:
+            c=0
+            r=r+1
+        else:
+            c=1
+        (uc.S,uc.basis)=solve(mesh,uc.elem)
+        (m,z)=uc.basis.refinterp(uc.S,nrefs=3)
+        print(f'{uc.name}: max_warping = {max(z.max(),-z.min()):.3G}')
+        if do_tsplot:
+            tsplot(uc,m,z)
+        if do_qtplot:
+            qtplot(uc,m,z,scale=qtplot_scale)
