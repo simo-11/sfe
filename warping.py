@@ -94,7 +94,7 @@ scale={scale:.3g}, max warping={max_disp:.3G}
     return (scale)
 
 def solve(mesh: sf.mesh.Mesh, elem: sf.element.Element):
-    basis = sf.Basis(mesh, sf.ElementTriP2())
+    basis = sf.Basis(mesh, elem)
     # Stiffness matrix: ∫ grad(v)·grad(u) dA
     A = sf.asm(laplace, basis)
     # boundary condition
@@ -104,18 +104,15 @@ def solve(mesh: sf.mesh.Mesh, elem: sf.element.Element):
         g = x * ny - y * nx
         return g * v
     b = sf.asm(bc, basis.boundary())
-    # Fix the constant mode (Neumann nullspace)
-    boundary_facets = mesh.facets_satisfying(
-        lambda x: np.ones(x.shape[1], dtype=bool)
-    )
-    D = basis.get_dofs(facets=boundary_facets)
-    A, b = sf.enforce(A, b,D=D.nodal['u'][[0]])
+    # Fix the constant at random point, scale later
+    D = basis.split_indices()[0][[0]]
+    A, b = sf.enforce(A, b,D=D)
     S = sf.solve(A, b)
     return (S,basis)
 class Model(enum.Enum):
     SQUARE=1
     RECTANGLE=2
-model=Model.RECTANGLE
+model=Model.SQUARE
 do_tsplot=False
 do_qtplot=False
 mesh_scale=100
@@ -126,7 +123,7 @@ if not do_qtplot:
         mp=globals()["mp"]
         mp.close()
         del(mp)
-for nc in range(3,14,2):
+for nc in range(3,5,1):
     match model:
         case Model.SQUARE:
             x_nodes=nc
@@ -147,20 +144,20 @@ for nc in range(3,14,2):
             )
         case _:
             raise ValueError(f"model {model} is not supported")
-    print(f'Model={model}, nvertices={mesh.nvertices}')
+    print(f'Model={model}, nc={nc}, nvertices={mesh.nvertices}')
     ucs=[
-    #     types.SimpleNamespace(elem=sf.ElementTriN1()),
-    #     types.SimpleNamespace(elem=sf.ElementTriN2()),
-    #     types.SimpleNamespace(elem=sf.ElementTriN3()),
-         types.SimpleNamespace(elem=sf.ElementTriP0()),
-    #     types.SimpleNamespace(elem=sf.ElementTriP1()),
-    #     types.SimpleNamespace(elem=sf.ElementTriP1B()),
-    #    types.SimpleNamespace(elem=sf.ElementTriP1G()),
-         types.SimpleNamespace(elem=sf.ElementTriP2()),
-    #     types.SimpleNamespace(elem=sf.ElementTriP2B()),
-    #     types.SimpleNamespace(elem=sf.ElementTriP2G()),
-    #     types.SimpleNamespace(elem=sf.ElementTriP3()),
-    #    types.SimpleNamespace(elem=sf.ElementTriP4()),
+        #types.SimpleNamespace(elem=sf.ElementTriN1()), # c_einsum fails
+        #types.SimpleNamespace(elem=sf.ElementTriN2()), # c_einsum fails
+        #types.SimpleNamespace(elem=sf.ElementTriN3()), # c_einsum fails
+        #types.SimpleNamespace(elem=sf.ElementTriP0()),  # Solve fails
+        types.SimpleNamespace(elem=sf.ElementTriP1()),
+        types.SimpleNamespace(elem=sf.ElementTriP1B()),
+        types.SimpleNamespace(elem=sf.ElementTriP1G()),
+        types.SimpleNamespace(elem=sf.ElementTriP2()),
+        types.SimpleNamespace(elem=sf.ElementTriP2B()),
+        types.SimpleNamespace(elem=sf.ElementTriP2G()),
+        types.SimpleNamespace(elem=sf.ElementTriP3()),
+        types.SimpleNamespace(elem=sf.ElementTriP4()),
          ]
     rows = math.ceil(len(ucs) / 2)
     if do_qtplot:
@@ -175,20 +172,28 @@ for nc in range(3,14,2):
     r=0
     c=0
     for uc in ucs:
-        uc.name=type(uc.elem).__name__.split('Element')[-1]
-        if do_tsplot:
-            uc.ax=fig.add_subplot(rows, 2, r * 2 + c + 1, projection="3d")
-        if do_qtplot:
-            uc.mp=mp[r,c]
-        if c==1:
-            c=0
-            r=r+1
-        else:
-            c=1
-        (uc.S,uc.basis)=solve(mesh,uc.elem)
-        (m,z)=uc.basis.refinterp(uc.S,nrefs=3)
-        print(f'{uc.name}: max_warping = {max(z.max(),-z.min()):.3G}')
-        if do_tsplot:
-            tsplot(uc,m,z)
-        if do_qtplot:
-            qtplot(uc,m,z,scale=qtplot_scale)
+        try:
+            uc.name=type(uc.elem).__name__.split('Element')[-1]
+            if do_tsplot:
+                uc.ax=fig.add_subplot(rows, 2, r * 2 + c + 1, projection="3d")
+            if do_qtplot:
+                uc.mp=mp[r,c]
+            if c==1:
+                c=0
+                r=r+1
+            else:
+                c=1
+            (uc.S,uc.basis)=solve(mesh,uc.elem)
+            (m,z)=uc.basis.refinterp(uc.S,nrefs=1)
+            if np.isnan(z).any():
+                print(f'Solution failed for {uc.name}')
+                continue
+            print(f'{uc.name}: max_warping = {max(z.max(),-z.min()):.3G}')
+            if do_tsplot:
+                tsplot(uc,m,z)
+            if do_qtplot:
+                qtplot(uc,m,z,scale=qtplot_scale)
+        except Exception:
+            import traceback
+            print(f'Solution failed for {uc.name}')
+            traceback.print_exc()
