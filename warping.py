@@ -142,13 +142,42 @@ def solve(mesh: sf.mesh.Mesh, elem: sf.element.Element):
     A, b = sf.enforce(A, b,D=D)
     S = sf.solve(A, b)
     return (S,basis)
+
+def sp(uc, m: sf.mesh.Mesh, z:np.ndarray):
+    """
+    Parameters
+    ----------
+    uc : types.SimpleNamespace
+        use case, this routine fills dict sp (section properties)
+    m : sf.mesh.Mesh
+        DESCRIPTION.
+    z : np.ndarray
+        warping solution
+
+    Returns
+    -------
+    None.
+
+    """
+    sp={}
+    @skfem.Functional
+    def area(w):
+      return 1
+    sp["area"]=area.assemble(uc.basis)
+    #sp["c"]=c
+    #sp["gamma"]=gamma
+    #sp["j"]=j
+    #sp["sc"]=sc
+    uc.sp=sp
+
 class Model(enum.Enum):
     SQUARE=1
     RECTANGLE=2
 model=Model.SQUARE
 do_tsplot=False
 do_qtplot=False
-mesh_scale=100
+do_sp=True
+mesh_scale=1
 if not do_tsplot:
     plt.close('all')
 if not do_qtplot:
@@ -156,7 +185,7 @@ if not do_qtplot:
         mp=globals()["mp"]
         mp.close()
         del(mp)
-for nc in range(3,5,1):
+for nc in (10,):
     match model:
         case Model.SQUARE:
             x_nodes=nc
@@ -170,7 +199,7 @@ for nc in range(3,5,1):
             x_nodes=nc
             y_nodes=nc
             qtplot_scale=-0.1
-            mesh_scale=1000
+            mesh_scale=1
             mesh = sf.MeshTri.init_tensor(
                 mesh_scale*np.linspace(-0.05, 0.05, x_nodes),
                 mesh_scale*np.linspace(-0.005, 0.005, y_nodes)
@@ -183,14 +212,14 @@ for nc in range(3,5,1):
         #types.SimpleNamespace(elem=sf.ElementTriN2()), # c_einsum fails
         #types.SimpleNamespace(elem=sf.ElementTriN3()), # c_einsum fails
         #types.SimpleNamespace(elem=sf.ElementTriP0()),  # Solve fails
-        types.SimpleNamespace(elem=sf.ElementTriP1()),
-        types.SimpleNamespace(elem=sf.ElementTriP1B()),
-        types.SimpleNamespace(elem=sf.ElementTriP1G()),
+        #types.SimpleNamespace(elem=sf.ElementTriP1()),
+        #types.SimpleNamespace(elem=sf.ElementTriP1B()),
+        #types.SimpleNamespace(elem=sf.ElementTriP1G()),
         types.SimpleNamespace(elem=sf.ElementTriP2()),
-        types.SimpleNamespace(elem=sf.ElementTriP2B()),
-        types.SimpleNamespace(elem=sf.ElementTriP2G()),
-        types.SimpleNamespace(elem=sf.ElementTriP3()),
-        types.SimpleNamespace(elem=sf.ElementTriP4()),
+        #types.SimpleNamespace(elem=sf.ElementTriP2B()),
+        #types.SimpleNamespace(elem=sf.ElementTriP2G()),
+        #types.SimpleNamespace(elem=sf.ElementTriP3()),
+        #types.SimpleNamespace(elem=sf.ElementTriP4()),
          ]
     rows = math.ceil(len(ucs) / 2)
     if do_qtplot:
@@ -203,6 +232,7 @@ for nc in range(3,5,1):
     for uc in ucs:
         try:
             uc.name=type(uc.elem).__name__.split('Element')[-1]
+            uc.scale=mesh_scale
             if do_tsplot:
                 uc.ax=fig.add_subplot(rows, 2, r * 2 + c + 1, projection="3d")
             if do_qtplot:
@@ -217,11 +247,15 @@ for nc in range(3,5,1):
             if np.isnan(z).any():
                 print(f'Solution failed for {uc.name}')
                 continue
-            print(f'{uc.name}: max_warping = {max(z.max(),-z.min()):.3G}')
+            print(f'{uc.name}: max_warping = {(z.max()-z.min())/2:.3G}')
             if do_tsplot:
                 tsplot(uc,m,z)
             if do_qtplot:
                 qtplot(uc,m,z,scale=qtplot_scale)
+            if do_sp:
+                sp(uc,m,z)
+                print(f'''Section properties
+  area={uc.sp['area']:.3G}''')
         except Exception:
             import traceback
             print(f'Solution failed for {uc.name}')
@@ -254,13 +288,18 @@ def neumann(v, w):
 b += skfem.asm(neumann, basis.boundary())
 # Solve
 omega = skfem.solve(A, b)
-omega_field = skfem.Field(basis, omega)
-@skfem.LinearForm
-def lf_den(v, w):
-    return w.u
-den = skfem.asm(lf_den, omega_field)
-num_ex = basis.integrate(lambda w: w.x[1] * w.u, omega)
-num_ey = basis.integrate(lambda w: w.x[0] * w.u, omega)
+@skfem.Functional
+def den_integral(w):
+   return w['uh']
+den=den_integral.assemble(basis, uh=basis.interpolate(omega))
+@skfem.Functional
+def ex_integral(w):
+   return w['uh']*w['x'][1]
+num_ex=ex_integral.assemble(basis, uh=basis.interpolate(omega))
+@skfem.Functional
+def ey_integral(w):
+   return w['uh']*w['x'][0]
+num_ey=ey_integral.assemble(basis, uh=basis.interpolate(omega))
 ex = num_ex / den
 ey = -num_ey / den
 print("Shear center (ω):", ex, ey)
