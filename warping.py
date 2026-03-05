@@ -27,7 +27,6 @@ import pyvistaqt
 import matplotlib.pyplot as plt
 import matplotlib.colors as plt_colors
 
-# %% setup
 def tsplot(uc,m: sf.mesh.Mesh,z:np.ndarray):
     ax=uc.ax
     ax.set_title(uc.name)
@@ -41,6 +40,7 @@ def tsplot(uc,m: sf.mesh.Mesh,z:np.ndarray):
     pyplot.pause(0.01)
 
 def start_mp(rows=1):
+    global mp
     if not "mp" in globals():
         mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=2)
     if mp._nrows != rows:
@@ -116,55 +116,73 @@ def qtplot(uc, m: sf.mesh.Mesh,z:np.ndarray,
         grid='back',
         location='outer',
         ticks='both',
-        xtitle='X',
-        ytitle='Y',
+        xtitle='X[mm]',
+        ytitle='Y[mm]',
+        fmt="%.0f",
         ztitle='warping'
     )
     uc.mp.add_text(f"""{uc.name} {mesh.n_points} points
-scale={scale:.3g}, max warping={max_disp:.3G}
+scale={scale:.4G}, max warping={max_disp:.4G}
 """, font_size=12)
     uc.mp.render()
     return (scale)
 
-def solve(mesh: sf.mesh.Mesh, elem: sf.element.Element):
-    basis = sf.Basis(mesh, elem)
+def solve(uc):
     # Stiffness matrix: ∫ grad(v)·grad(u) dA
-    A = sf.asm(laplace, basis)
+    A = sf.asm(laplace, uc.basis)
     # boundary condition
     def bc(v, w):
         x, y = w.x[0], w.x[1]
         nx, ny = w.n[0], w.n[1]
         g = x * ny - y * nx
         return g * v
-    b = sf.asm(bc, basis.boundary())
+    b = sf.asm(bc, uc.basis.boundary())
     # Fix the constant at random point, scale later
-    D = basis.split_indices()[0][[0]]
+    D = uc.basis.split_indices()[0][[0]]
     A, b = sf.enforce(A, b,D=D)
-    S = sf.solve(A, b)
-    return (S,basis)
+    uc.S = sf.solve(A, b)
 
-def sp(uc, m: sf.mesh.Mesh, z:np.ndarray):
+def sp(uc):
     """
     Parameters
     ----------
     uc : types.SimpleNamespace
-        use case, this routine fills dict sp (section properties)
-    m : sf.mesh.Mesh
-        DESCRIPTION.
-    z : np.ndarray
-        warping solution
-
+        use case, this routine fills dict sp using
+        section properties with similar namings as in
+        https://sectionproperties.readthedocs.io/
     Returns
     -------
     None.
 
     """
     sp={}
-    @skfem.Functional
-    def area(w):
+    @sf.Functional
+    def i_area(w):
       return 1
-    sp["area"]=area.assemble(uc.basis)
-    #sp["c"]=c
+    sp["area"]=area=i_area.assemble(uc.basis)
+    @sf.Functional
+    def i_cx(w):
+      return w['x'][0]
+    cx=i_cx.assemble(uc.basis)/area
+    @sf.Functional
+    def i_cy(w):
+      return w['x'][1]
+    cy=i_cy.assemble(uc.basis)/area
+    @sf.Functional
+    def i_xx(w):
+      return (w['x'][1]-cy)**2
+    ixx=i_xx.assemble(uc.basis)
+    @sf.Functional
+    def i_yy(w):
+      return (w['x'][0]-cx)**2
+    iyy=i_yy.assemble(uc.basis)
+    @sf.Functional
+    def i_xy(w):
+      return (w['x'][0]-cx)*(w['x'][1]-cy)
+    ixy=i_xy.assemble(uc.basis)
+    sp["c"]=[cx,cy]
+    sp["ic"]=[ixx,iyy,ixy]
+    solve(uc)
     #sp["gamma"]=gamma
     #sp["j"]=j
     #sp["sc"]=sc
@@ -173,11 +191,11 @@ def sp(uc, m: sf.mesh.Mesh, z:np.ndarray):
 class Model(enum.Enum):
     SQUARE=1
     RECTANGLE=2
-model=Model.SQUARE
+models=list(Model)
 do_tsplot=False
-do_qtplot=False
+do_qtplot=True
 do_sp=True
-mesh_scale=1
+mesh_scale=1000
 if not do_tsplot:
     plt.close('all')
 if not do_qtplot:
@@ -185,84 +203,96 @@ if not do_qtplot:
         mp=globals()["mp"]
         mp.close()
         del(mp)
-for nc in (10,):
-    match model:
-        case Model.SQUARE:
-            x_nodes=nc
-            y_nodes=nc
-            qtplot_scale=-0.3
-            mesh = sf.MeshTri.init_tensor(
-                mesh_scale*np.linspace(-0.05, 0.05, x_nodes),
-                mesh_scale*np.linspace(-0.05, 0.05, y_nodes)
-            )
-        case Model.RECTANGLE:
-            x_nodes=nc
-            y_nodes=nc
-            qtplot_scale=-0.1
-            mesh_scale=1
-            mesh = sf.MeshTri.init_tensor(
-                mesh_scale*np.linspace(-0.05, 0.05, x_nodes),
-                mesh_scale*np.linspace(-0.005, 0.005, y_nodes)
-            )
-        case _:
-            raise ValueError(f"model {model} is not supported")
-    print(f'Model={model}, nc={nc}, nvertices={mesh.nvertices}')
-    ucs=[
-        #types.SimpleNamespace(elem=sf.ElementTriN1()), # c_einsum fails
-        #types.SimpleNamespace(elem=sf.ElementTriN2()), # c_einsum fails
-        #types.SimpleNamespace(elem=sf.ElementTriN3()), # c_einsum fails
-        #types.SimpleNamespace(elem=sf.ElementTriP0()),  # Solve fails
-        #types.SimpleNamespace(elem=sf.ElementTriP1()),
-        #types.SimpleNamespace(elem=sf.ElementTriP1B()),
-        #types.SimpleNamespace(elem=sf.ElementTriP1G()),
-        types.SimpleNamespace(elem=sf.ElementTriP2()),
-        #types.SimpleNamespace(elem=sf.ElementTriP2B()),
-        #types.SimpleNamespace(elem=sf.ElementTriP2G()),
-        #types.SimpleNamespace(elem=sf.ElementTriP3()),
-        #types.SimpleNamespace(elem=sf.ElementTriP4()),
-         ]
-    rows = math.ceil(len(ucs) / 2)
-    if do_qtplot:
-        start_mp(rows=rows)
-    if do_tsplot:
-        fig = pyplot.figure(num='warping using skfem',clear=True)
-        pyplot.tight_layout()
-    r=0
-    c=0
-    for uc in ucs:
-        try:
-            uc.name=type(uc.elem).__name__.split('Element')[-1]
-            uc.scale=mesh_scale
-            if do_tsplot:
-                uc.ax=fig.add_subplot(rows, 2, r * 2 + c + 1, projection="3d")
-            if do_qtplot:
-                uc.mp=mp[r,c]
-            if c==1:
-                c=0
-                r=r+1
-            else:
-                c=1
-            (uc.S,uc.basis)=solve(mesh,uc.elem)
-            (m,z)=uc.basis.refinterp(uc.S,nrefs=1)
-            if np.isnan(z).any():
+r=0
+c=0
+for model in models:
+    for nc in (2,):
+        match model:
+            case Model.SQUARE:
+                x_nodes=nc
+                y_nodes=nc
+                qtplot_scale=-0.3
+                mesh = sf.MeshTri.init_tensor(
+                    mesh_scale*np.linspace(0, 0.1, x_nodes),
+                    mesh_scale*np.linspace(0, 0.1, y_nodes)
+                )
+            case Model.RECTANGLE:
+                x_nodes=nc
+                y_nodes=nc
+                qtplot_scale=-0.1
+                mesh = sf.MeshTri.init_tensor(
+                    mesh_scale*np.linspace(0, 0.1, x_nodes),
+                    mesh_scale*np.linspace(0, 0.01, y_nodes)
+                )
+            case _:
+                raise ValueError(f"model {model} is not supported")
+        print(f'Model={model}, nc={nc}, nvertices={mesh.nvertices}')
+        ucs=[
+            #types.SimpleNamespace(elem=sf.ElementTriN1()), # c_einsum fails
+            #types.SimpleNamespace(elem=sf.ElementTriN2()), # c_einsum fails
+            #types.SimpleNamespace(elem=sf.ElementTriN3()), # c_einsum fails
+            #types.SimpleNamespace(elem=sf.ElementTriP0()),  # Solve fails
+            #types.SimpleNamespace(elem=sf.ElementTriP1()),
+            #types.SimpleNamespace(elem=sf.ElementTriP1B()),
+            #types.SimpleNamespace(elem=sf.ElementTriP1G()),
+            types.SimpleNamespace(elem=sf.ElementTriP2()),
+            #types.SimpleNamespace(elem=sf.ElementTriP2B()),
+            #types.SimpleNamespace(elem=sf.ElementTriP2G()),
+            #types.SimpleNamespace(elem=sf.ElementTriP3()),
+            #types.SimpleNamespace(elem=sf.ElementTriP4()),
+             ]
+        rows = math.ceil(len(ucs) * len(models)/ 2)
+        if do_qtplot:
+            start_mp(rows=rows)
+        if do_tsplot:
+            fig = pyplot.figure(num='warping using skfem',clear=True)
+            pyplot.tight_layout()
+        for uc in ucs:
+            try:
+                uc.name=type(uc.elem).__name__.split('Element')[-1]
+                uc.basis=sf.Basis(mesh, uc.elem)
+                uc.scale=mesh_scale
+                if do_tsplot:
+                    uc.ax=fig.add_subplot(rows,
+                                          2, r * 2 + c + 1,
+                                          projection="3d")
+                if do_qtplot:
+                    uc.mp=mp[r,c]
+                if c==1:
+                    c=0
+                    r=r+1
+                else:
+                    c=1
+                if do_sp or do_qtplot or do_tsplot:
+                    sp(uc)
+                    if do_sp:
+                        m4=mesh_scale**4
+                        print(f'''Section properties
+  area={uc.sp['area']/(mesh_scale**2):.4G}
+  c=[{uc.sp['c'][0]/mesh_scale:.4G},{uc.sp['c'][1]/mesh_scale:.4G}]
+  ic=[{uc.sp['ic'][0]/m4:.4G}, \
+{uc.sp['ic'][1]/m4:.4G}, \
+{uc.sp['ic'][2]/m4:.4G}]
+''')
+                if do_qtplot or do_tsplot:
+                    (m,z)=uc.basis.refinterp(uc.S,nrefs=1)
+                    if np.isnan(z).any():
+                        print(f'Solution failed for {uc.name}')
+                        continue
+                    print((f'{uc.name}: max_warping ='
+                           f' {(z.max()-z.min())/2:.4G}'))
+                    if do_tsplot:
+                        tsplot(uc,m,z)
+                    if do_qtplot:
+                        qtplot(uc,m,z,scale=qtplot_scale)
+            except Exception:
+                import traceback
                 print(f'Solution failed for {uc.name}')
-                continue
-            print(f'{uc.name}: max_warping = {(z.max()-z.min())/2:.3G}')
-            if do_tsplot:
-                tsplot(uc,m,z)
-            if do_qtplot:
-                qtplot(uc,m,z,scale=qtplot_scale)
-            if do_sp:
-                sp(uc,m,z)
-                print(f'''Section properties
-  area={uc.sp['area']:.3G}''')
-        except Exception:
-            import traceback
-            print(f'Solution failed for {uc.name}')
-            traceback.print_exc()
+                traceback.print_exc()
 # %%  Saint‑Venant
 # warping (ω): Laplace = 0
 # \nabla ^2\omega =0,\qquad \frac{\partial \omega }{\partial n}=yn_x-xn_y.
+'''
 import numpy as np
 import skfem
 
@@ -274,13 +304,13 @@ e = skfem.ElementTriP1()
 basis = skfem.Basis(m, e)
 
 # Bilinear form: ∫ ∇u · ∇v
-@skfem.BilinearForm
+@sf.BilinearForm
 def bilinf(u, v, _):
     return skfem.helpers.dot(u.grad, v.grad)
 A = skfem.asm(bilinf, basis)
 b = np.zeros(A.shape[0])
 # Natural BC: ∂ω/∂n = y n_x − x n_y
-@skfem.LinearForm
+@sf.LinearForm
 def neumann(v, w):
     nx, ny = w.n
     x, y = w.x
@@ -288,15 +318,15 @@ def neumann(v, w):
 b += skfem.asm(neumann, basis.boundary())
 # Solve
 omega = skfem.solve(A, b)
-@skfem.Functional
+@sf.Functional
 def den_integral(w):
    return w['uh']
 den=den_integral.assemble(basis, uh=basis.interpolate(omega))
-@skfem.Functional
+@sf.Functional
 def ex_integral(w):
    return w['uh']*w['x'][1]
 num_ex=ex_integral.assemble(basis, uh=basis.interpolate(omega))
-@skfem.Functional
+@sf.Functional
 def ey_integral(w):
    return w['uh']*w['x'][0]
 num_ey=ey_integral.assemble(basis, uh=basis.interpolate(omega))
@@ -309,11 +339,11 @@ interp = basis.interpolate(omega)
 Cw_grad = basis.integrate(lambda w: skfem.helpers.dot(w.grad, w.grad), omega)
 print("Cw (gradient form) =", Cw_grad)
 mplot(m, omega=omega)
-@skfem.Integral
+@sf.Integral
 def gradx(w):
     return w.grad(w.u)[0]
 
-@skfem.Integral
+@sf.Integral
 def grady(w):
     return w.grad(w.u)[1]
 
@@ -333,7 +363,7 @@ E = 210e9      # Young's modulus (Pa)
 theta = 1.0    # unit twist
 
 sigma_w = E * theta * omega
-@skfem.Integral
+@sf.Integral
 def bimoment_integrand(w):
     return w.u**2
 
@@ -356,14 +386,14 @@ e = skfem.ElementTriP2()
 basis = skfem.Basis(m, e)
 
 # Bilinear form
-@skfem.BilinearForm
+@sf.BilinearForm
 def bilinf(u, v, w):
     return w.grad(u) @ w.grad(v)
 
 A = skfem.asm(bilinf, basis)
 
 # RHS: ∫ 2 v dA
-@skfem.LinearForm
+@sf.LinearForm
 def rhs(v, w):
     return 2.0 * v
 
@@ -376,32 +406,32 @@ A, b = skfem.enforce(A, b, D=D)
 # Solve
 phi = skfem.solve(A, b)
 
-@skfem.Integral
+@sf.Integral
 def tau_xz(w):
     return w.grad(w.u)[1]   # dφ/dy
 
-@skfem.Integral
+@sf.Integral
 def tau_yz(w):
     return -w.grad(w.u)[0]  # -dφ/dx
 
 qx = skfem.asm(tau_xz, basis, phi)
 qy = skfem.asm(tau_yz, basis, phi)
-@skfem.Integral
+@sf.Integral
 def Vx_integrand(w):
     return w.grad(w.u)[1]   # qx
 
-@skfem.Integral
+@sf.Integral
 def Vy_integrand(w):
     return -w.grad(w.u)[0]  # qy
 
 Vx = skfem.asm(Vx_integrand, basis, phi)
 Vy = skfem.asm(Vy_integrand, basis, phi)
-@skfem.Integral
+@sf.Integral
 def Mx_integrand(w):
     x, y = w.x
     return y * (-w.grad(w.u)[0])   # y * qy
 
-@skfem.Integral
+@sf.Integral
 def My_integrand(w):
     x, y = w.x
     return x * (w.grad(w.u)[1])    # x * qx
@@ -417,7 +447,7 @@ print("e_x =", ex)
 print("e_y =", ey)
 
 # Compute torsion constant J = 2 ∫ φ dA
-@skfem.Integral
+@sf.Integral
 def integrand(w):
     return 2.0 * w.u
 
@@ -441,14 +471,14 @@ e = skfem.ElementTriRT0()
 basis = skfem.Basis(m, e)
 
 # Bilinear form: mass matrix (q, v)
-@skfem.BilinearForm
+@sf.BilinearForm
 def mass(u, v, w):
     return u @ v
 
 A = skfem.asm(mass, basis)
 
 # RHS: ∫ 2 div(v) dA
-@skfem.LinearForm
+@sf.LinearForm
 def rhs(v, w):
     return 2.0 * w.div(v)
 
@@ -461,3 +491,4 @@ q = skfem.solve(A, b)
 qx = q[0::2]
 qy = q[1::2]
 m.save('q.vtk', qx=qx, qy=qy)
+'''
