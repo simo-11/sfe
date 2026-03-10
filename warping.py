@@ -128,17 +128,18 @@ scale={scale:.4G}, max warping={max_disp:.4G}
     return (scale)
 
 def solve(uc):
+    uc.t_basis=sf.Basis(uc.t_mesh, uc.elem)
     # Stiffness matrix: ∫ grad(v)·grad(u) dA
-    A = sf.asm(laplace, uc.basis)
+    A = sf.asm(laplace, uc.t_basis)
     # boundary condition
     def bc(v, w):
         x, y = w.x[0], w.x[1]
         nx, ny = w.n[0], w.n[1]
         g = x * ny - y * nx
         return g * v
-    b = sf.asm(bc, uc.basis.boundary())
+    b = sf.asm(bc, uc.t_basis.boundary())
     # Fix the constant at random point, scale later
-    D = uc.basis.split_indices()[0][[0]]
+    D = uc.t_basis.split_indices()[0][[0]]
     A, b = sf.enforce(A, b,D=D)
     uc.S = sf.solve(A, b)
 
@@ -150,10 +151,6 @@ def sp(uc):
         use case, this routine fills dict sp using
         section properties with similar namings as in
         https://sectionproperties.readthedocs.io/
-    Returns
-    -------
-    None.
-
     """
     sp={}
     @sf.Functional
@@ -182,10 +179,32 @@ def sp(uc):
     ixy=i_xy.assemble(uc.basis)
     sp["c"]=[cx,cy]
     sp["ic"]=[ixx,iyy,ixy]
+    p = mesh.p.copy()
+    t = mesh.t.copy()
+    p = p + np.array([[-cx], [-cy]])
+    uc.t_mesh=sf.MeshTri(p,t)
     solve(uc)
-    #sp["gamma"]=gamma
+    @sf.Functional
+    def i_den(w):
+       return w['uh']
+    den=i_den.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
+    @sf.Functional
+    def i_nex(w):
+       return w['uh']*w['x'][1]
+    nex=i_nex.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
+    @sf.Functional
+    def i_ney(w):
+       return w['uh']*w['x'][0]
+    ney=i_ney.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
+    scx = nex / den
+    scy = -ney / den
+    @sf.Functional
+    def i_cw(w):
+       return w['uh']**2
+    gamma=i_cw.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
+    sp["gamma"]=gamma
     #sp["j"]=j
-    #sp["sc"]=sc
+    sp["sc"]=[scx,scy]
     uc.sp=sp
 
 class Model(enum.Enum):
@@ -195,7 +214,7 @@ models=list(Model)
 do_tsplot=False
 do_qtplot=True
 do_sp=True
-mesh_scale=1000
+mesh_scale=1
 if not do_tsplot:
     plt.close('all')
 if not do_qtplot:
@@ -206,7 +225,7 @@ if not do_qtplot:
 r=0
 c=0
 for model in models:
-    for nc in (2,):
+    for nc in (11,):
         match model:
             case Model.SQUARE:
                 x_nodes=nc
@@ -267,12 +286,15 @@ for model in models:
                     sp(uc)
                     if do_sp:
                         m4=mesh_scale**4
+                        m6=mesh_scale**6
                         print(f'''Section properties
   area={uc.sp['area']/(mesh_scale**2):.4G}
   c=[{uc.sp['c'][0]/mesh_scale:.4G},{uc.sp['c'][1]/mesh_scale:.4G}]
   ic=[{uc.sp['ic'][0]/m4:.4G}, \
 {uc.sp['ic'][1]/m4:.4G}, \
 {uc.sp['ic'][2]/m4:.4G}]
+  sc=[{uc.sp['sc'][0]/mesh_scale:.4G},{uc.sp['sc'][1]/mesh_scale:.4G}]
+  gamma={uc.sp['gamma']/m6:.4G}
 ''')
                 if do_qtplot or do_tsplot:
                     (m,z)=uc.basis.refinterp(uc.S,nrefs=1)
