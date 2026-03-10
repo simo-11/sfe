@@ -185,36 +185,33 @@ def sp(uc):
     uc.t_mesh=sf.MeshTri(p,t)
     solve(uc)
     @sf.Functional
-    def i_den(w):
-       return w['uh']
-    den=i_den.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
-    @sf.Functional
-    def i_nex(w):
+    def i_wx(w):
        return w['uh']*w['x'][1]
-    nex=i_nex.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
+    wx=i_wx.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
     @sf.Functional
-    def i_ney(w):
+    def i_wy(w):
        return w['uh']*w['x'][0]
-    ney=i_ney.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
-    scx = nex / den
-    scy = -ney / den
+    wy=i_wy.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
+    scx = wy/iyy
+    scy = wx/ixx
     @sf.Functional
     def i_cw(w):
        return w['uh']**2
     gamma=i_cw.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
     sp["gamma"]=gamma
     #sp["j"]=j
-    sp["sc"]=[scx,scy]
+    sp["sc"]=[cx+scx,cy+scy]
     uc.sp=sp
 
 class Model(enum.Enum):
     SQUARE=1
     RECTANGLE=2
 models=list(Model)
+#models=(Model.RECTANGLE,)
 do_tsplot=False
 do_qtplot=True
 do_sp=True
-mesh_scale=1
+mesh_scale=1000
 if not do_tsplot:
     plt.close('all')
 if not do_qtplot:
@@ -225,7 +222,7 @@ if not do_qtplot:
 r=0
 c=0
 for model in models:
-    for nc in (11,):
+    for nc in (10,):
         match model:
             case Model.SQUARE:
                 x_nodes=nc
