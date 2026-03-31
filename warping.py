@@ -185,19 +185,24 @@ def sp(uc):
     uc.t_mesh=sf.MeshTri(p,t)
     solve(uc)
     @sf.Functional
-    def i_wx(w):
+    def i_xw(w):
        return w['uh']*w['x'][1]
-    wx=i_wx.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
+    xw=i_xw.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
     @sf.Functional
-    def i_wy(w):
+    def i_yw(w):
        return w['uh']*w['x'][0]
-    wy=i_wy.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
-    scx = wy/iyy
-    scy = wx/ixx
+    yw=i_yw.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
+    scx = yw/iyy
+    scy = xw/ixx
     @sf.Functional
-    def i_cw(w):
+    def i_w(w):
+       return w['uh']
+    iw=i_w.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
+    @sf.Functional
+    def i_ww(w):
        return w['uh']**2
-    gamma=i_cw.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
+    iww=i_ww.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
+    gamma=iww-iw*iw/area-scy*xw+scx*yw
     sp["gamma"]=gamma
     #sp["j"]=j
     sp["sc"]=[cx+scx,cy+scy]
@@ -209,7 +214,7 @@ class Model(enum.Enum):
 models=list(Model)
 #models=(Model.RECTANGLE,)
 do_tsplot=False
-do_qtplot=True
+do_qtplot=False
 do_sp=True
 mesh_scale=1000
 if not do_tsplot:
@@ -393,7 +398,7 @@ print("Bimoment B =", B)
 mplot(m, omega=omega, sigma_w=sigma_w)
 # %%  Prandtl
 # stress function (φ): Laplace = –2
-# \nabla ^2\phi =-2.
+# \nabla ^2\\phi =-2.
 import numpy as np
 import skfem
 
@@ -478,7 +483,7 @@ print("Torsion constant J =", J)
 m.save('phi.vtk', phi=phi)
 # %% shear‑flow
 # (q): H(div) → Raviart–Thomas RT0
-# \nabla \cdot \mathbf{q}=2.
+# \nabla \\cdot \\mathbf{q}=2.
 import numpy as np
 import skfem
 
