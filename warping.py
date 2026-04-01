@@ -8,14 +8,13 @@ Provides framework for testing various elements and processes for
 solution of warping function and cross section properties.
 
 TODO:
-    scale to shear center
-    calculate section properties
     support for at least U and RSH with rounded corners
 
 For a ready solution see https://sectionproperties.readthedocs.io/
 """
 import numpy as np
 import skfem as sf
+import skfem.io.meshio as skio
 from skfem.models.poisson import laplace
 import matplotlib.pyplot as pyplot
 import math
@@ -26,6 +25,110 @@ import pyvista as pv
 import pyvistaqt
 import matplotlib.pyplot as plt
 import matplotlib.colors as plt_colors
+import gmsh
+import meshio
+
+
+def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004):
+    """
+    Generate a thin-walled U-section with inner corner radius.
+    Returns scikit-fem MeshTri.
+    """
+    gmsh.initialize()
+    gmsh.model.add("u_section")
+# --- Local mesh sizes ---
+    lc_radius = ri / 4.0
+    lc_web = h / 25.0
+    lc_flange = b / 25.0
+    # --- Helper to add a point with region-based lc ---
+    def P(x, y, region):
+        if region == "radius":
+            lc = lc_radius
+        elif region == "web":
+            lc = lc_web
+        else:
+            lc = lc_flange
+        return gmsh.model.geo.addPoint(x, y, 0.0, lc)
+
+    # --- Outer radius ---
+    ro = ri + t
+
+    # --- Outer contour points ---
+    p1 = P(0, 0, "flange")
+    p2 = P(b, 0, "flange")
+    p3 = P(b, h, "web")
+    p4 = P(0, h, "web")
+
+    # --- Inner contour points ---
+    pi1 = P(t + ri, t, "radius")
+    pi2 = P(b - t - ri, t, "radius")
+    pi3 = P(b - t, t + ri, "radius")
+    pi4 = P(b - t, h - t - ri, "radius")
+    pi5 = P(b - t - ri, h - t, "radius")
+    pi6 = P(t + ri, h - t, "radius")
+    pi7 = P(t, h - t - ri, "radius")
+    pi8 = P(t, t + ri, "radius")
+
+    # --- Outer lines ---
+    l1 = gmsh.model.geo.addLine(p1, p2)
+    l2 = gmsh.model.geo.addLine(p2, p3)
+    l3 = gmsh.model.geo.addLine(p3, p4)
+    l4 = gmsh.model.geo.addLine(p4, p1)
+
+    outer_loop = gmsh.model.geo.addCurveLoop([l1, l2, l3, l4])
+
+    # --- Inner straight lines ---
+    li1 = gmsh.model.geo.addLine(pi1, pi2)
+    li2 = gmsh.model.geo.addLine(pi3, pi4)
+    li3 = gmsh.model.geo.addLine(pi5, pi6)
+    li4 = gmsh.model.geo.addLine(pi7, pi8)
+
+    # --- Arc centers ---
+    c1 = P(t + ri, t + ri, "radius")
+    c2 = P(b - t - ri, t + ri, "radius")
+    c3 = P(b - t - ri, h - t - ri, "radius")
+    c4 = P(t + ri, h - t - ri, "radius")
+
+    # --- Inner arcs ---
+    a1 = gmsh.model.geo.addCircleArc(pi2, c2, pi3)
+    a2 = gmsh.model.geo.addCircleArc(pi4, c3, pi5)
+    a3 = gmsh.model.geo.addCircleArc(pi6, c4, pi7)
+    a4 = gmsh.model.geo.addCircleArc(pi8, c1, pi1)
+
+    inner_loop = gmsh.model.geo.addCurveLoop(
+        [li1, a1, li2, a2, li3, a3, li4, a4]
+    )
+
+    # --- Surface (outer minus inner) ---
+    surf = gmsh.model.geo.addPlaneSurface([outer_loop, inner_loop])
+
+    gmsh.model.geo.synchronize()
+    gmsh.model.addPhysicalGroup(2, [surf], 1)
+
+    # --- Mesh generation ---
+    gmsh.model.mesh.generate(2)
+
+    # --- Extract mesh ---
+    nodes = gmsh.model.mesh.getNodes()
+    node_coords = nodes[1].reshape(-1, 3)
+
+    elem_types, elem_tags, elem_node_tags = \
+        gmsh.model.mesh.getElements(2, surf)
+
+    tri_cells = None
+    for etype, enodes in zip(elem_types, elem_node_tags):
+        if len(enodes) % 3 == 0:
+            tri_cells = np.array(enodes, int).reshape(-1, 3) - 1
+            break
+
+    gmsh.finalize()
+
+    meshio_mesh = meshio.Mesh(
+        points=node_coords[:, :2],
+        cells=[("triangle", tri_cells)]
+    )
+
+    return skio.from_meshio(meshio_mesh)
 
 def tsplot(uc,m: sf.mesh.Mesh,z:np.ndarray):
     ax=uc.ax
@@ -211,10 +314,11 @@ def sp(uc):
 class Model(enum.Enum):
     SQUARE=1
     RECTANGLE=2
+    U=3
 models=list(Model)
-#models=(Model.RECTANGLE,)
-do_tsplot=False
-do_qtplot=False
+models=(Model.U,)
+do_tsplot=True
+do_qtplot=True
 do_sp=True
 mesh_scale=1000
 if not do_tsplot:
@@ -245,6 +349,11 @@ for model in models:
                     mesh_scale*np.linspace(0, 0.1, x_nodes),
                     mesh_scale*np.linspace(0, 0.01, y_nodes)
                 )
+            case Model.U:
+                x_nodes=nc
+                y_nodes=nc
+                qtplot_scale=-0.1
+                mesh = u_mesh(0.1,0.05,0.004,0.004,)
             case _:
                 raise ValueError(f"model {model} is not supported")
         print(f'Model={model}, nc={nc}, nvertices={mesh.nvertices}')
