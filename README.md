@@ -42,11 +42,12 @@ for all used ones at least Debugger and IPython
 Dependencies can be installed using pip
  * spyder-kernels - needed for spyder integration
  * scikit-fem - main target for this repo, requires numpy and scipy [all] also brings also matplotlib
+ * gmsh - geometry and mesh definitions
  * pyvistaqt pyqt5 - requires pyvista and qtpy
 
 Typical command needed after update of python is (uv in front if it is used)
 ```
-uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5
+uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh
 ```
 
 ## Using sfe
