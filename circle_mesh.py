@@ -98,17 +98,70 @@ def draw_curved_edges(mesh, basis, ax):
 
 def start_mp(rows=1):
     global mp
+    ncols=2
     if not "mp" in globals():
-        mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=1)
+        mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=ncols)
     if mp._nrows != rows:
         mp.close()
-        mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=1)
+        mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=ncols)
     return mp[0,0]
+
+def get_curve_info(curve_tag):
+    """Return a dictionary with detailed information about a curve entity."""
+    info = {}
+    b = gmsh.model.getBoundary([(1, curve_tag)])
+    start_pt = b[0][1]
+    end_pt = b[1][1]
+    info["center"] = b[0][0]
+    info["start_point"] = start_pt
+    info["end_point"] = end_pt
+    return info
+
+def get_surface_info(surface_tag):
+    """Return detailed information about a surface entity (Gmsh 4.12+)."""
+    info = {}
+    # --- 2) Boundary curves ---
+    _upward, curves = gmsh.model.getAdjacencies(2, surface_tag)
+    info["boundary_curves"] = curves.tolist()
+    return info
+
+def list_entities():
+    """Print all Gmsh entities and their types in a clean table."""
+    ents = gmsh.model.getEntities()
+
+    print(f"{'Dim':<4} {'Tag':<6} {'Type':<20} {'Extra info'}")
+    print("-" * 60)
+
+    for dim, tag in ents:
+        etype = gmsh.model.getType(dim, tag)
+
+        # Extra info depending on dimension
+        extra = ""
+
+        # --- Points ---
+        if dim == 0:
+            x, y, z = gmsh.model.getValue(0, tag, np.array([]))
+            extra = f"({x:.3f}, {y:.3f}, {z:.3f})"
+
+        # --- Curves ---
+        elif dim == 1:
+            extra=get_curve_info(tag)
+        # --- Surfaces ---
+        elif dim == 2:
+            extra=get_surface_info(tag)
+        # --- Volumes ---
+        elif dim == 3:
+            try:
+                vol = gmsh.model.getMeasure(3, [tag])
+                extra = f"volume={vol:.3f}"
+            except:
+                extra = ""
+
+        print(f"{dim:<4} {tag:<6} {etype:<20} {extra}")
 
 
 def make_circle_mesh(r=1.0, lc=0.2, order=1,
-                     quad=False, serendipity=False,
-                     pv_plot=False):
+                     quad=False, serendipity=False):
     """Generate a circular mesh using gmsh with adjustable radius,
     element size, element order, quad/tri mode and serendipity/full."""
 
@@ -149,18 +202,19 @@ def make_circle_mesh(r=1.0, lc=0.2, order=1,
 
     # --- Generate mesh ---
     gmsh.model.mesh.generate(2)
-
-    # --- Optional PyVista plot ---
-    if pv_plot:
-        pv_mesh = gmsh_to_pyvista()
-        plotter.add_mesh(pv_mesh, show_edges=True)
-        plotter.show()
-
     # --- Extract mesh ---
     nodes = gmsh.model.mesh.getNodes()[1].reshape(-1, 3)
     elem_types, elem_tags, elem_node_tags = \
         gmsh.model.mesh.getElements(2, surf)
-
+    if do_list_entities:
+        list_entities()
+    # --- Optional PyVista plot ---
+    if pv_plot:
+        amp=mp[0,order-1]
+        amp.clear()
+        pv_mesh = gmsh_to_pyvista()
+        amp.add_mesh(pv_mesh, style="wireframe")
+        plotter.show()
     gmsh.finalize()
     return nodes, elem_types, elem_node_tags
     # Extract mesh
@@ -174,21 +228,24 @@ def make_circle_mesh(r=1.0, lc=0.2, order=1,
                     cells=[("triangle", tris)])
     return skio.from_meshio(m)
 
+do_list_entities=True
 do_plot=False
 pv_plot=True
+to_sf=False
 plotter = start_mp()
 # --- Create mesh ---
-mesh = make_circle_mesh(r=1.0, lc=0.8)
-
-# --- P2 basis ---
-basis = sf.InteriorBasis(mesh, sf.ElementTriP2())
-
-if do_plot:
-    # --- Plot ---
-    fig = plt.figure(num='circle_mesh',clear=True)
-    ax = fig.add_subplot()
-    mesh.draw(ax=ax, color='k', lw=0.5)
-    #draw_curved_edges(mesh, basis, ax)
-    ax.set_aspect('equal')
-    ax.set_title("Black = gmsh mesh, Red = true P2 curved edges")
-    plt.show()
+for order in range(1,3):
+    elem=sf.ElementTriP2()
+    mesh = make_circle_mesh(r=1.0, lc=0.8,order=order)
+    do_list_entities=False
+    if to_sf:
+        basis = sf.InteriorBasis(mesh, elem)
+    if do_plot:
+        # --- Plot ---
+        fig = plt.figure(num='circle_mesh',clear=True)
+        ax = fig.add_subplot()
+        mesh.draw(ax=ax, color='k', lw=0.5)
+        #draw_curved_edges(mesh, basis, ax)
+        ax.set_aspect('equal')
+        ax.set_title("Black = gmsh mesh, Red = true P2 curved edges")
+        plt.show()
