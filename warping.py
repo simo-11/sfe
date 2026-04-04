@@ -158,10 +158,11 @@ def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004, order=1):
     """
     gmsh.initialize()
     gmsh.model.add("u_section")
+    gmsh.option.setNumber("Mesh.ElementOrder", order)
 # --- Local mesh sizes ---
     lc_radius = ri / 1.0
-    lc_web = h / 5.0
-    lc_flange = b / 5.0
+    lc_web = t
+    lc_flange = t
     # --- Helper to add a point with region-based lc ---
     def P(x, y, region):
         if region == "radius":
@@ -193,7 +194,7 @@ def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004, order=1):
     c1 = P(t + ri, t + ri, "radius")
     a1 = gmsh.model.geo.addCircleArc(p4, c1, p5)
     a2 = gmsh.model.geo.addCircleArc(p8, c1, p1)
-    if do_list_entities:
+    if do_list_entities and False:
         list_entities()
 
     loop = gmsh.model.geo.addCurveLoop([l1, l2, l3, a1, l4, l5, l6, a2])
@@ -201,19 +202,23 @@ def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004, order=1):
     # --- Surface (outer minus inner) ---
     surf = gmsh.model.geo.addPlaneSurface([loop])
     gmsh.model.geo.synchronize()
-    original_entities = gmsh.model.getEntities(dim=1)
-    copy_tags = gmsh.model.occ.copy(original_entities)
-    # Mirror through the YZ-plane (x=0)
-    # Parameters: copy_tags, point_on_plane(x,y,z), normal_of_plane(nx,ny,nz)
-    gmsh.model.occ.mirror(copy_tags, 0, h/2, 0, 0, 1, 0)
-    # 4. Remove duplicate nodes at the symmetry line
-    gmsh.model.occ.synchronize()
-    gmsh.model.occ.removeAllDuplicates()
-    gmsh.model.addPhysicalGroup(2, [surf], 1)
-
+    entities  = gmsh.model.getEntities(dim=2)
+    # 3. Copy and Mirror (Symmetrize)
+    # Parameters for symmetrize: A, B, C, D
+    # representing plane Ax + By + Cz + D = 0
+    # For mirroring across the YZ-plane (x=0),
+    # the plane equation is 1x + 0y + 0z + 0 = 0
+    copy_tags = gmsh.model.geo.copy(entities)
+    gmsh.model.geo.symmetrize(copy_tags, 0, -1, 0, h/2)
+    # 4. Synchronize again to apply the symmetry
+    gmsh.model.geo.synchronize()
+    # 5. Remove duplicates at the symmetry line
+    ## (essential for a continuous mesh)
+    gmsh.model.mesh.removeDuplicateNodes()
+    gmsh.model.geo.synchronize()
+    #gmsh.model.addPhysicalGroup(2, [surf], 1)
     # --- Mesh generation ---
     gmsh.model.mesh.generate(2)
-
     # --- Extract mesh ---
     nodes = gmsh.model.mesh.getNodes()
     node_coords = nodes[1].reshape(-1, 3)
@@ -236,12 +241,12 @@ def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004, order=1):
         amp.add_text(f'gmsh mesh for U using order of {order}'
                       ,font_size=12)
         pv_mesh = gmsh_to_pyvista()
-        smooth_mesh = pv_mesh.tessellate()
+        smooth_mesh = pv_mesh.tessellate(max_n_subdivide=2)
         amp.add_mesh(smooth_mesh
                      ,scalars="Gmsh_gamma", clim=[0, 1], cmap="RdYlGn"
-                     ,show_edges=False
+                     ,show_edges=True
                      ,opacity=0.8)
-        if nodes[0].shape[0]<200:
+        if nodes[0].shape[0]<1000:
             amp.add_points(pv_mesh.points,
                        color="red",
                        point_size=8,
@@ -445,7 +450,7 @@ models=(Model.U,)
 do_tsplot=True
 do_qtplot=False
 do_sp=True
-do_list_entities=True
+do_list_entities=False
 gmsh_plot=True
 mesh_scale=1000
 if not do_tsplot:
@@ -459,39 +464,12 @@ r=0
 c=0
 for model in models:
     for nc in (10,):
-        match model:
-            case Model.SQUARE:
-                x_nodes=nc
-                y_nodes=nc
-                qtplot_scale=-0.3
-                mesh = sf.MeshTri.init_tensor(
-                    mesh_scale*np.linspace(0, 0.1, x_nodes),
-                    mesh_scale*np.linspace(0, 0.1, y_nodes)
-                )
-            case Model.RECTANGLE:
-                x_nodes=nc
-                y_nodes=nc
-                qtplot_scale=-0.1
-                mesh = sf.MeshTri.init_tensor(
-                    mesh_scale*np.linspace(0, 0.1, x_nodes),
-                    mesh_scale*np.linspace(0, 0.01, y_nodes)
-                )
-            case Model.U:
-                x_nodes=nc
-                y_nodes=nc
-                qtplot_scale=-0.1
-                if gmsh_plot:
-                    start_mp(rows=1)
-                mesh = u_mesh(0.1,0.05,0.004,0.004,order=1)
-            case _:
-                raise ValueError(f"model {model} is not supported")
-        print(f'Model={model}, nc={nc}, nvertices={mesh.nvertices}')
         ucs=[
             #types.SimpleNamespace(elem=sf.ElementTriN1()), # c_einsum fails
             #types.SimpleNamespace(elem=sf.ElementTriN2()), # c_einsum fails
             #types.SimpleNamespace(elem=sf.ElementTriN3()), # c_einsum fails
             #types.SimpleNamespace(elem=sf.ElementTriP0()),  # Solve fails
-            #types.SimpleNamespace(elem=sf.ElementTriP1()),
+            types.SimpleNamespace(elem=sf.ElementTriP1()),
             #types.SimpleNamespace(elem=sf.ElementTriP1B()),
             #types.SimpleNamespace(elem=sf.ElementTriP1G()),
             types.SimpleNamespace(elem=sf.ElementTriP2()),
@@ -509,6 +487,44 @@ for model in models:
         for uc in ucs:
             try:
                 uc.name=type(uc.elem).__name__.split('Element')[-1]
+                match uc.name:
+                    case s if s.startswith('TriP2'):
+                        order=2
+                    case s if s.startswith('TriP1'):
+                        order=1
+                    case _:
+                        raise ValueError(f"Element {uc.name} is"
+                                         "not supported")
+                match model:
+                    case Model.SQUARE:
+                        x_nodes=nc
+                        y_nodes=nc
+                        qtplot_scale=-0.3
+                        mesh = sf.MeshTri.init_tensor(
+                            mesh_scale*np.linspace(0, 0.1, x_nodes),
+                            mesh_scale*np.linspace(0, 0.1, y_nodes)
+                        )
+                    case Model.RECTANGLE:
+                        x_nodes=nc
+                        y_nodes=nc
+                        qtplot_scale=-0.1
+                        mesh = sf.MeshTri.init_tensor(
+                            mesh_scale*np.linspace(0, 0.1, x_nodes),
+                            mesh_scale*np.linspace(0, 0.01, y_nodes)
+                        )
+                    case Model.U:
+                        x_nodes=nc
+                        y_nodes=nc
+                        qtplot_scale=-0.1
+                        if gmsh_plot:
+                            start_mp(rows=1)
+                        mesh = u_mesh(mesh_scale*0.1
+                                      ,mesh_scale*0.05
+                                      ,mesh_scale*0.004
+                                      ,mesh_scale*0.004,order=order)
+                    case _:
+                        raise ValueError(f"model {model} is not supported")
+                print(f'Model={model}, nc={nc}, nvertices={mesh.nvertices}')
                 uc.basis=sf.Basis(mesh, uc.elem)
                 uc.scale=mesh_scale
                 if do_tsplot:
