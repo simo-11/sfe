@@ -13,70 +13,71 @@ import matplotlib.pyplot as plt
 import skfem as sf
 import pyvistaqt
 import pyvista as pv
-
+import vtk
 
 def gmsh_to_pyvista():
-    """Convert current gmsh model to a PyVista PolyData mesh."""
+    """
+    Convert current gmsh model to a PyVista UnstructuredGrid.
+    Supports curved quadratic elements (Tri6, Quad8, Quad9).
+    """
     # --- Nodes ---
-    nodes = gmsh.model.mesh.getNodes()[1].reshape(-1, 3)
+    # Get node tags and coordinates (N, 3)
+    node_tags, nodes_flat, _ = gmsh.model.mesh.getNodes()
+    nodes = nodes_flat.reshape(-1, 3)
+
+    # Map Gmsh tags to 0-based indices for VTK connectivity
+    max_tag = int(np.max(node_tags))
+    tag_to_idx = np.full(max_tag + 1, -1, dtype=np.int64)
+    tag_to_idx[node_tags.astype(int)] = np.arange(len(node_tags))
 
     # --- Elements ---
-    elem_types, elem_tags, elem_node_tags = \
-        gmsh.model.mesh.getElements()
+    elem_types, elem_tags, elem_node_tags = gmsh.model.mesh.getElements()
 
-    tri3 = None    # etype 2
-    tri6 = None    # etype 9
-    quad4 = None   # etype 3
-    quad9 = None   # etype 10
-    quad8 = None   # etype 16
+    cells = []
+    cell_types = []
+    gmsh_gamma = []      # To store quality
+    gmsh_distortion = [] # To store distortion
+    # Map Gmsh element types to VTK cell types
+    # 2: Tri3, 9: Tri6, 3: Quad4, 16: Quad8, 10: Quad9
+    mapping = {
+        2:  (3, vtk.VTK_TRIANGLE),
+        9:  (6, vtk.VTK_QUADRATIC_TRIANGLE),
+        3:  (4, vtk.VTK_QUAD),
+        16: (8, vtk.VTK_QUADRATIC_QUAD),
+        10: (9, vtk.VTK_LAGRANGE_QUADRILATERAL)
+    }
 
-    for etype, enodes in zip(elem_types, elem_node_tags):
-        if etype == 2:      # 3-node triangle
-            tri3 = np.array(enodes, int).reshape(-1, 3) - 1
-        elif etype == 9:    # 6-node triangle
-            tri6 = np.array(enodes, int).reshape(-1, 6) - 1
-        elif etype == 3:    # 4-node quad
-            quad4 = np.array(enodes, int).reshape(-1, 4) - 1
-        elif etype == 10:   # 9-node quad
-            quad9 = np.array(enodes, int).reshape(-1, 9) - 1
-        elif etype == 16:   # 8-node serendipity quad
-            quad8 = np.array(enodes, int).reshape(-1, 8) - 1
+    for etype, etags, enodes in zip(elem_types, elem_tags, elem_node_tags):
+        if etype not in mapping:
+            continue
+        # Get Gmsh internal quality metrics for these specific tags
+        # 'gamma' (shape) and 'distortion' (Jacobian determinant)
+        q_gamma = gmsh.model.mesh.getElementQualities(etags, "gamma")
+        q_dist = gmsh.model.mesh.getElementQualities(etags, "minSJ")
+        num_nodes, vtk_type = mapping[etype]
+        # Convert all tags in this group to local indices
+        node_indices = tag_to_idx[enodes.astype(int)].reshape(-1, num_nodes)
 
-    if all(x is None for x in [tri3, tri6, quad4, quad9, quad8]):
-        raise ValueError("No supported elements (2,3,9,10,16).")
+        for i, cell_nodes in enumerate(node_indices):
+            cells.append(num_nodes)
+            cells.extend(cell_nodes)
+            cell_types.append(vtk_type)
+            # Store the metrics corresponding to this cell
+            gmsh_gamma.append(q_gamma[i])
+            gmsh_distortion.append(q_dist[i])
 
-    # --- Build VTK cell array ---
-    cell_list = []
+    if not cells:
+        raise ValueError("No supported elements found.")
 
-    if tri3 is not None:
-        for t in tri3:
-            cell_list.append(3)
-            cell_list.extend(t)
+    # --- Create UnstructuredGrid ---
+    # PolyData is for linear faces; UnstructuredGrid handles quadratic cells
+    pv_mesh = pv.UnstructuredGrid(np.array(cells),
+                                 np.array(cell_types, dtype=np.uint8),
+                                 nodes)
 
-    if tri6 is not None:
-        for t in tri6:
-            cell_list.append(6)
-            cell_list.extend(t)
-
-    if quad4 is not None:
-        for q in quad4:
-            cell_list.append(4)
-            cell_list.extend(q)
-
-    if quad8 is not None:
-        for q in quad8:
-            cell_list.append(8)
-            cell_list.extend(q)
-
-    if quad9 is not None:
-        for q in quad9:
-            cell_list.append(9)
-            cell_list.extend(q)
-
-    cells = np.array(cell_list, dtype=np.int64)
-
-    # --- Create PyVista mesh ---
-    pv_mesh = pv.PolyData(nodes, cells)
+    # Attach Gmsh internal quality as Cell Data
+    pv_mesh.cell_data["Gmsh_gamma"] = np.array(gmsh_gamma)
+    pv_mesh.cell_data["Gmsh_minSJ"] = np.array(gmsh_distortion)
 
     return pv_mesh
 def draw_curved_edges(mesh, basis, ax):
@@ -98,12 +99,15 @@ def draw_curved_edges(mesh, basis, ax):
 
 def start_mp(rows=1):
     global mp
-    ncols=2
+    make_new=False
     if not "mp" in globals():
-        mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=ncols)
+        make_new=True
     if mp._nrows != rows:
         mp.close()
-        mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=ncols)
+        make_new=True
+    if make_new:
+        mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=2)
+        mp._window.setWindowTitle("circle_mesh")
     return mp[0,0]
 
 def get_curve_info(curve_tag):
@@ -212,8 +216,20 @@ def make_circle_mesh(r=1.0, lc=0.2, order=1,
     if pv_plot:
         amp=mp[0,order-1]
         amp.clear()
+        amp.add_text(f'gmsh mesh using order of {order}'
+                     ,font_size=12)
         pv_mesh = gmsh_to_pyvista()
-        amp.add_mesh(pv_mesh, style="wireframe")
+        smooth_mesh = pv_mesh.tessellate()
+        # 3. Add the filled surface (The "Skin")
+        # We set show_edges=False here to hide the tiny triangles
+        amp.add_mesh(smooth_mesh
+                    ,scalars="Gmsh_gamma", clim=[0, 1], cmap="RdYlGn"
+                    ,show_edges=False
+                    ,opacity=0.8)
+        amp.add_points(pv_mesh.points,
+                      color="red",
+                      point_size=8,
+                      render_points_as_spheres=True)
         plotter.show()
     gmsh.finalize()
     return nodes, elem_types, elem_node_tags
@@ -228,7 +244,7 @@ def make_circle_mesh(r=1.0, lc=0.2, order=1,
                     cells=[("triangle", tris)])
     return skio.from_meshio(m)
 
-do_list_entities=True
+do_list_entities=False
 do_plot=False
 pv_plot=True
 to_sf=False

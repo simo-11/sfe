@@ -27,9 +27,131 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as plt_colors
 import gmsh
 import meshio
+import vtk
+
+def get_curve_info(curve_tag):
+    """Return a dictionary with detailed information about a curve entity."""
+    info = {}
+    b = gmsh.model.getBoundary([(1, curve_tag)])
+    start_pt = b[0][1]
+    end_pt = b[1][1]
+    info["center"] = b[0][0]
+    info["start_point"] = start_pt
+    info["end_point"] = end_pt
+    return info
+
+def get_surface_info(surface_tag):
+    """Return detailed information about a surface entity (Gmsh 4.12+)."""
+    info = {}
+    # --- 2) Boundary curves ---
+    _upward, curves = gmsh.model.getAdjacencies(2, surface_tag)
+    info["boundary_curves"] = curves.tolist()
+    return info
+
+def list_entities():
+    """Print all Gmsh entities and their types in a clean table."""
+    gmsh.model.geo.synchronize()
+    ents = gmsh.model.getEntities()
+
+    print(f"{'Dim':<4} {'Tag':<6} {'Type':<20} {'Extra info'}")
+    print("-" * 60)
+
+    for dim, tag in ents:
+        etype = gmsh.model.getType(dim, tag)
+
+        # Extra info depending on dimension
+        extra = ""
+
+        # --- Points ---
+        if dim == 0:
+            x, y, z = gmsh.model.getValue(0, tag, np.array([]))
+            extra = f"({x:.3f}, {y:.3f}, {z:.3f})"
+
+        # --- Curves ---
+        elif dim == 1:
+            extra=get_curve_info(tag)
+        # --- Surfaces ---
+        elif dim == 2:
+            extra=get_surface_info(tag)
+        # --- Volumes ---
+        elif dim == 3:
+            try:
+                vol = gmsh.model.getMeasure(3, [tag])
+                extra = f"volume={vol:.3f}"
+            except:
+                extra = ""
+
+        print(f"{dim:<4} {tag:<6} {etype:<20} {extra}")
 
 
-def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004):
+def gmsh_to_pyvista():
+    """
+    Convert current gmsh model to a PyVista UnstructuredGrid.
+    Supports curved quadratic elements (Tri6, Quad8, Quad9).
+    """
+    # --- Nodes ---
+    # Get node tags and coordinates (N, 3)
+    node_tags, nodes_flat, _ = gmsh.model.mesh.getNodes()
+    nodes = nodes_flat.reshape(-1, 3)
+
+    # Map Gmsh tags to 0-based indices for VTK connectivity
+    max_tag = int(np.max(node_tags))
+    tag_to_idx = np.full(max_tag + 1, -1, dtype=np.int64)
+    tag_to_idx[node_tags.astype(int)] = np.arange(len(node_tags))
+
+    # --- Elements ---
+    elem_types, elem_tags, elem_node_tags = gmsh.model.mesh.getElements()
+
+    cells = []
+    cell_types = []
+    gmsh_gamma = []      # To store quality
+    gmsh_distortion = [] # To store distortion
+    # Map Gmsh element types to VTK cell types
+    # 2: Tri3, 9: Tri6, 3: Quad4, 16: Quad8, 10: Quad9
+    mapping = {
+        2:  (3, vtk.VTK_TRIANGLE),
+        9:  (6, vtk.VTK_QUADRATIC_TRIANGLE),
+        3:  (4, vtk.VTK_QUAD),
+        16: (8, vtk.VTK_QUADRATIC_QUAD),
+        10: (9, vtk.VTK_LAGRANGE_QUADRILATERAL)
+    }
+
+    for etype, etags, enodes in zip(elem_types, elem_tags, elem_node_tags):
+        if etype not in mapping:
+            continue
+        # Get Gmsh internal quality metrics for these specific tags
+        # 'gamma' (shape) and 'distortion' (Jacobian determinant)
+        q_gamma = gmsh.model.mesh.getElementQualities(etags, "gamma")
+        q_dist = gmsh.model.mesh.getElementQualities(etags, "minSJ")
+        num_nodes, vtk_type = mapping[etype]
+        # Convert all tags in this group to local indices
+        node_indices = tag_to_idx[enodes.astype(int)].reshape(-1, num_nodes)
+
+        for i, cell_nodes in enumerate(node_indices):
+            cells.append(num_nodes)
+            cells.extend(cell_nodes)
+            cell_types.append(vtk_type)
+            # Store the metrics corresponding to this cell
+            gmsh_gamma.append(q_gamma[i])
+            gmsh_distortion.append(q_dist[i])
+
+    if not cells:
+        raise ValueError("No supported elements found.")
+
+    # --- Create UnstructuredGrid ---
+    # PolyData is for linear faces; UnstructuredGrid handles quadratic cells
+    pv_mesh = pv.UnstructuredGrid(np.array(cells),
+                                 np.array(cell_types, dtype=np.uint8),
+                                 nodes)
+
+    # Attach Gmsh internal quality as Cell Data
+    pv_mesh.cell_data["Gmsh_gamma"] = np.array(gmsh_gamma)
+    pv_mesh.cell_data["Gmsh_minSJ"] = np.array(gmsh_distortion)
+
+    return pv_mesh
+
+
+def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004, order=1):
     """
     Generate a thin-walled U-section with inner corner radius.
     Returns scikit-fem MeshTri.
@@ -37,9 +159,9 @@ def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004):
     gmsh.initialize()
     gmsh.model.add("u_section")
 # --- Local mesh sizes ---
-    lc_radius = ri / 4.0
-    lc_web = h / 25.0
-    lc_flange = b / 25.0
+    lc_radius = ri / 1.0
+    lc_web = h / 5.0
+    lc_flange = b / 5.0
     # --- Helper to add a point with region-based lc ---
     def P(x, y, region):
         if region == "radius":
@@ -52,57 +174,41 @@ def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004):
 
     # --- Outer radius ---
     ro = ri + t
-
-    # --- Outer contour points ---
-    p1 = P(0, 0, "flange")
+    p1 = P(ro, 0, "radius")
     p2 = P(b, 0, "flange")
-    p3 = P(b, h, "web")
-    p4 = P(0, h, "web")
-
-    # --- Inner contour points ---
-    pi1 = P(t + ri, t, "radius")
-    pi2 = P(b - t - ri, t, "radius")
-    pi3 = P(b - t, t + ri, "radius")
-    pi4 = P(b - t, h - t - ri, "radius")
-    pi5 = P(b - t - ri, h - t, "radius")
-    pi6 = P(t + ri, h - t, "radius")
-    pi7 = P(t, h - t - ri, "radius")
-    pi8 = P(t, t + ri, "radius")
-
-    # --- Outer lines ---
+    p3 = P(b, t, "flange")
+    p4 = P(ro, t, "radius")
+    p5 = P(t, ro, "radius")
+    p6 = P(t, h/2, "web")
+    p7 = P(0, h/2, "web")
+    p8 = P(0, ro, "radius")
+    # --- straight lines ---
     l1 = gmsh.model.geo.addLine(p1, p2)
     l2 = gmsh.model.geo.addLine(p2, p3)
     l3 = gmsh.model.geo.addLine(p3, p4)
-    l4 = gmsh.model.geo.addLine(p4, p1)
-
-    outer_loop = gmsh.model.geo.addCurveLoop([l1, l2, l3, l4])
-
-    # --- Inner straight lines ---
-    li1 = gmsh.model.geo.addLine(pi1, pi2)
-    li2 = gmsh.model.geo.addLine(pi3, pi4)
-    li3 = gmsh.model.geo.addLine(pi5, pi6)
-    li4 = gmsh.model.geo.addLine(pi7, pi8)
-
+    l4 = gmsh.model.geo.addLine(p5, p6)
+    l5 = gmsh.model.geo.addLine(p6, p7)
+    l6 = gmsh.model.geo.addLine(p7, p8)
     # --- Arc centers ---
     c1 = P(t + ri, t + ri, "radius")
-    c2 = P(b - t - ri, t + ri, "radius")
-    c3 = P(b - t - ri, h - t - ri, "radius")
-    c4 = P(t + ri, h - t - ri, "radius")
+    a1 = gmsh.model.geo.addCircleArc(p4, c1, p5)
+    a2 = gmsh.model.geo.addCircleArc(p8, c1, p1)
+    if do_list_entities:
+        list_entities()
 
-    # --- Inner arcs ---
-    a1 = gmsh.model.geo.addCircleArc(pi2, c2, pi3)
-    a2 = gmsh.model.geo.addCircleArc(pi4, c3, pi5)
-    a3 = gmsh.model.geo.addCircleArc(pi6, c4, pi7)
-    a4 = gmsh.model.geo.addCircleArc(pi8, c1, pi1)
-
-    inner_loop = gmsh.model.geo.addCurveLoop(
-        [li1, a1, li2, a2, li3, a3, li4, a4]
-    )
+    loop = gmsh.model.geo.addCurveLoop([l1, l2, l3, a1, l4, l5, l6, a2])
 
     # --- Surface (outer minus inner) ---
-    surf = gmsh.model.geo.addPlaneSurface([outer_loop, inner_loop])
-
+    surf = gmsh.model.geo.addPlaneSurface([loop])
     gmsh.model.geo.synchronize()
+    original_entities = gmsh.model.getEntities(dim=1)
+    copy_tags = gmsh.model.occ.copy(original_entities)
+    # Mirror through the YZ-plane (x=0)
+    # Parameters: copy_tags, point_on_plane(x,y,z), normal_of_plane(nx,ny,nz)
+    gmsh.model.occ.mirror(copy_tags, 0, h/2, 0, 0, 1, 0)
+    # 4. Remove duplicate nodes at the symmetry line
+    gmsh.model.occ.synchronize()
+    gmsh.model.occ.removeAllDuplicates()
     gmsh.model.addPhysicalGroup(2, [surf], 1)
 
     # --- Mesh generation ---
@@ -121,8 +227,27 @@ def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004):
             tri_cells = np.array(enodes, int).reshape(-1, 3) - 1
             break
 
+    if do_list_entities:
+        list_entities()
+     # --- Optional PyVista plot ---
+    if gmsh_plot:
+        amp=mp[0,order-1]
+        amp.clear()
+        amp.add_text(f'gmsh mesh for U using order of {order}'
+                      ,font_size=12)
+        pv_mesh = gmsh_to_pyvista()
+        smooth_mesh = pv_mesh.tessellate()
+        amp.add_mesh(smooth_mesh
+                     ,scalars="Gmsh_gamma", clim=[0, 1], cmap="RdYlGn"
+                     ,show_edges=False
+                     ,opacity=0.8)
+        if nodes[0].shape[0]<200:
+            amp.add_points(pv_mesh.points,
+                       color="red",
+                       point_size=8,
+                       render_points_as_spheres=True)
+        mp.show()
     gmsh.finalize()
-
     meshio_mesh = meshio.Mesh(
         points=node_coords[:, :2],
         cells=[("triangle", tri_cells)]
@@ -318,12 +443,14 @@ class Model(enum.Enum):
 models=list(Model)
 models=(Model.U,)
 do_tsplot=True
-do_qtplot=True
+do_qtplot=False
 do_sp=True
+do_list_entities=True
+gmsh_plot=True
 mesh_scale=1000
 if not do_tsplot:
     plt.close('all')
-if not do_qtplot:
+if not do_qtplot and not gmsh_plot:
     if "mp" in globals():
         mp=globals()["mp"]
         mp.close()
@@ -353,7 +480,9 @@ for model in models:
                 x_nodes=nc
                 y_nodes=nc
                 qtplot_scale=-0.1
-                mesh = u_mesh(0.1,0.05,0.004,0.004,)
+                if gmsh_plot:
+                    start_mp(rows=1)
+                mesh = u_mesh(0.1,0.05,0.004,0.004,order=1)
             case _:
                 raise ValueError(f"model {model} is not supported")
         print(f'Model={model}, nc={nc}, nvertices={mesh.nvertices}')
