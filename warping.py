@@ -151,18 +151,18 @@ def gmsh_to_pyvista():
     return pv_mesh
 
 
-def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004, order=1):
+def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     """
     Generate a thin-walled U-section with inner corner radius.
-    Returns scikit-fem MeshTri.
+    Returns scikit-fem Mesh.
     """
     gmsh.initialize()
     gmsh.model.add("u_section")
-    gmsh.option.setNumber("Mesh.ElementOrder", order)
+    gmsh.option.setNumber("Mesh.ElementOrder", uc.order)
 # --- Local mesh sizes ---
-    lc_radius = ri / 1.0
-    lc_web = t
-    lc_flange = t
+    lc_radius = 40*ri / 1.0
+    lc_web = 40*t
+    lc_flange = 40*t
     # --- Helper to add a point with region-based lc ---
     def P(x, y, region):
         if region == "radius":
@@ -196,11 +196,8 @@ def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004, order=1):
     a2 = gmsh.model.geo.addCircleArc(p8, c1, p1)
     if do_list_entities and False:
         list_entities()
-
     loop = gmsh.model.geo.addCurveLoop([l1, l2, l3, a1, l4, l5, l6, a2])
-
-    # --- Surface (outer minus inner) ---
-    surf = gmsh.model.geo.addPlaneSurface([loop])
+    gmsh.model.geo.addPlaneSurface([loop])
     gmsh.model.geo.synchronize()
     entities  = gmsh.model.getEntities(dim=2)
     # 3. Copy and Mirror (Symmetrize)
@@ -216,15 +213,24 @@ def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004, order=1):
     ## (essential for a continuous mesh)
     gmsh.model.mesh.removeDuplicateNodes()
     gmsh.model.geo.synchronize()
-    #gmsh.model.addPhysicalGroup(2, [surf], 1)
+    all_surf=gmsh.model.getEntities(dim=2)
+    surface_tags = [tag for dim, tag in all_surf]
+    if uc.quad:
+        gmsh.model.mesh.setRecombine(2, all_surf)
+        # Full 9-node quad (etype 10)
+        if not uc.serendipity:
+            gmsh.option.setNumber("Mesh.SecondOrderLinear", 0)
+        # Serendipity 8-node quad (etype 16)
+        else:
+            gmsh.option.setNumber("Mesh.SecondOrderLinear", 1)
+    gmsh.model.addPhysicalGroup(2, surface_tags, 1)
     # --- Mesh generation ---
     gmsh.model.mesh.generate(2)
     # --- Extract mesh ---
     nodes = gmsh.model.mesh.getNodes()
     node_coords = nodes[1].reshape(-1, 3)
 
-    elem_types, elem_tags, elem_node_tags = \
-        gmsh.model.mesh.getElements(2, surf)
+    elem_types, elem_tags, elem_node_tags = gmsh.model.mesh.getElements(2)
 
     tri_cells = None
     for etype, enodes in zip(elem_types, elem_node_tags):
@@ -236,9 +242,9 @@ def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004, order=1):
         list_entities()
      # --- Optional PyVista plot ---
     if gmsh_plot:
-        amp=mp[0,order-1]
+        amp=mp[0,uc.order-1]
         amp.clear()
-        amp.add_text(f'gmsh mesh for U using order of {order}'
+        amp.add_text(f'gmsh mesh for U using {uc.name}, order={uc.order}'
                       ,font_size=12)
         pv_mesh = gmsh_to_pyvista()
         smooth_mesh = pv_mesh.tessellate(max_n_subdivide=2)
@@ -254,11 +260,11 @@ def u_mesh(h=0.1, b=0.05, t=0.004, ri=0.004, order=1):
         mp.show()
     gmsh.finalize()
     meshio_mesh = meshio.Mesh(
-        points=node_coords[:, :2],
-        cells=[("triangle", tri_cells)]
+        points=node_coords,
+        cells=[(uc.meshio_type, tri_cells)]
     )
-
-    return skio.from_meshio(meshio_mesh)
+    sf_mesh=skio.from_meshio(meshio_mesh)
+    return sf_mesh
 
 def tsplot(uc,m: sf.mesh.Mesh,z:np.ndarray):
     ax=uc.ax
@@ -307,12 +313,12 @@ def mplot(mesh: sf.mesh.Mesh, **fields):
 
 def qtplot(uc, m: sf.mesh.Mesh,z:np.ndarray,
            scale=None, **kwargs):
+    max_disp = max(z.max(),-z.min())
     # Apply scaled displacement to mesh
     if scale==None or scale<0:
         x_range = max(m.p[0])-min(m.p[0])
         y_range = max(m.p[1])-min(m.p[1])
         max_dim = max(x_range, y_range)
-        max_disp = max(z.max(),-z.min())
         if scale==None:
             scaler=0.1
         else:
@@ -447,11 +453,15 @@ class Model(enum.Enum):
     U=3
 models=list(Model)
 models=(Model.U,)
-do_tsplot=True
-do_qtplot=False
+do_tsplot=False
+do_qtplot=True
 do_sp=True
 do_list_entities=False
 gmsh_plot=True
+if gmsh_plot:
+    gmsh_slot=1
+else:
+    gmsh_slot=0
 mesh_scale=1000
 if not do_tsplot:
     plt.close('all')
@@ -472,13 +482,13 @@ for model in models:
             types.SimpleNamespace(elem=sf.ElementTriP1()),
             #types.SimpleNamespace(elem=sf.ElementTriP1B()),
             #types.SimpleNamespace(elem=sf.ElementTriP1G()),
-            types.SimpleNamespace(elem=sf.ElementTriP2()),
+            #types.SimpleNamespace(elem=sf.ElementTriP2()),
             #types.SimpleNamespace(elem=sf.ElementTriP2B()),
             #types.SimpleNamespace(elem=sf.ElementTriP2G()),
             #types.SimpleNamespace(elem=sf.ElementTriP3()),
             #types.SimpleNamespace(elem=sf.ElementTriP4()),
              ]
-        rows = math.ceil(len(ucs) * len(models)/ 2)
+        rows = math.ceil((len(ucs) * len(models)+gmsh_slot)/ 2)
         if do_qtplot:
             start_mp(rows=rows)
         if do_tsplot:
@@ -487,11 +497,15 @@ for model in models:
         for uc in ucs:
             try:
                 uc.name=type(uc.elem).__name__.split('Element')[-1]
+                uc.quad=False
+                uc.serendipity=False
                 match uc.name:
                     case s if s.startswith('TriP2'):
-                        order=2
+                        uc.order=2
+                        uc.meshio_type="tri6"
                     case s if s.startswith('TriP1'):
-                        order=1
+                        uc.order=1
+                        uc.meshio_type="triangle"
                     case _:
                         raise ValueError(f"Element {uc.name} is"
                                          "not supported")
@@ -515,16 +529,19 @@ for model in models:
                     case Model.U:
                         x_nodes=nc
                         y_nodes=nc
-                        qtplot_scale=-0.1
+                        qtplot_scale=0
                         if gmsh_plot:
                             start_mp(rows=1)
-                        mesh = u_mesh(mesh_scale*0.1
+                        mesh = u_mesh(uc
+                                      ,mesh_scale*0.1
                                       ,mesh_scale*0.05
                                       ,mesh_scale*0.004
-                                      ,mesh_scale*0.004,order=order)
+                                      ,mesh_scale*0.004)
+                        if gmsh_plot:
+                            c=c+1
                     case _:
                         raise ValueError(f"model {model} is not supported")
-                print(f'Model={model}, nc={nc}, nvertices={mesh.nvertices}')
+                print(f'Model={model}, nvertices={mesh.nvertices}')
                 uc.basis=sf.Basis(mesh, uc.elem)
                 uc.scale=mesh_scale
                 if do_tsplot:
