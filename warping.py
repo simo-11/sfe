@@ -2,15 +2,18 @@
 """
 Created on Thu Feb 19 19:49:39 2026
 @author: Simo
-Assisted by Microsoft Copilot
+Assisted by Microsoft Copilot and Google Search AI
 
 Provides framework for testing various elements and processes for
 solution of warping function and cross section properties.
+Supported elements are linear and quadratic triangles.
+Supported sections are square, rectangle and U
 
 TODO:
-    support for at least U and RSH with rounded corners
+    support for RSH with rounded corners
 
-For a ready solution see https://sectionproperties.readthedocs.io/
+For a ready solution and tested solution
+see https://sectionproperties.readthedocs.io/
 """
 import numpy as np
 import skfem as sf
@@ -28,6 +31,7 @@ import matplotlib.colors as plt_colors
 import gmsh
 import meshio
 import vtk
+import traceback
 
 def get_curve_info(curve_tag):
     """Return a dictionary with detailed information about a curve entity."""
@@ -150,6 +154,60 @@ def gmsh_to_pyvista():
 
     return pv_mesh
 
+def gmsh_to_meshio():
+    # Mapping Gmsh element names to meshio types
+    m_map = {
+        "triangle 3": "triangle",
+        "quadrilateral 4": "quad",
+        "triangle 6": "triangle6",
+        "quadrilateral 8": "quad8",
+        "quadrilateral 9": "quad9",
+        "tetrahedron 4": "tetra",
+        "tetrahedron 10": "tetra10",
+        "hexahedron 8": "hexa",
+        "hexahedron 20": "hexa20",
+        "hexahedron 27": "hexa27"
+    }
+
+    # 1. Collect elements and identify active nodes
+    cells, phys_data, active_tags = [], [], []
+    for _, e_tag in gmsh.model.getEntities(2):
+        e_types, _, e_nodes = gmsh.model.mesh.getElements(2, tag=e_tag)
+        gps = gmsh.model.get_physical_groups_for_entity(2, e_tag)
+        p_val = gps[0] if len(gps) > 0 else 0
+
+        for etype, enodes in zip(e_types, e_nodes):
+            prop = gmsh.model.mesh.getElementProperties(etype)
+            m_type = m_map.get(prop[0].lower(), prop[0].lower())
+            n_nodes = prop[3]
+
+            idx_block = enodes.reshape(-1, n_nodes)
+            cells.append((m_type, idx_block))
+            phys_data.append(np.full(len(idx_block), p_val, dtype=int))
+            active_tags.append(enodes)
+
+    if not active_tags:
+        return None
+
+    # 2. Filter coordinates: only keep nodes used by elements
+    used_nodes = np.unique(np.concatenate(active_tags))
+    coords = [gmsh.model.mesh.getNode(tag)[0] for tag in used_nodes]
+    pts = np.array(coords)
+
+    # 3. Create a mapping for 0-based indexing
+    t_map = {tag: i for i, tag in enumerate(used_nodes)}
+
+    # 4. Update cell connectivity with filtered indices
+    final_cells = []
+    v_map = np.vectorize(t_map.get)
+    for m_type, idx_block in cells:
+        final_cells.append((m_type, v_map(idx_block)))
+
+    return meshio.Mesh(
+        points=pts,
+        cells=final_cells,
+        cell_data={"gmsh:physical": phys_data}
+    )
 
 def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     """
@@ -157,12 +215,13 @@ def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     Returns scikit-fem Mesh.
     """
     gmsh.initialize()
+    gmsh.option.setNumber("General.Verbosity", 3)
     gmsh.model.add("u_section")
     gmsh.option.setNumber("Mesh.ElementOrder", uc.order)
 # --- Local mesh sizes ---
-    lc_radius = 40*ri / 1.0
-    lc_web = 40*t
-    lc_flange = 40*t
+    lc_radius = 0.5*ri
+    lc_web = 4*t
+    lc_flange = 4*t
     # --- Helper to add a point with region-based lc ---
     def P(x, y, region):
         if region == "radius":
@@ -172,8 +231,6 @@ def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
         else:
             lc = lc_flange
         return gmsh.model.geo.addPoint(x, y, 0.0, lc)
-
-    # --- Outer radius ---
     ro = ri + t
     p1 = P(ro, 0, "radius")
     p2 = P(b, 0, "flange")
@@ -181,37 +238,34 @@ def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     p4 = P(ro, t, "radius")
     p5 = P(t, ro, "radius")
     p6 = P(t, h/2, "web")
-    p7 = P(0, h/2, "web")
-    p8 = P(0, ro, "radius")
-    # --- straight lines ---
-    l1 = gmsh.model.geo.addLine(p1, p2)
-    l2 = gmsh.model.geo.addLine(p2, p3)
-    l3 = gmsh.model.geo.addLine(p3, p4)
-    l4 = gmsh.model.geo.addLine(p5, p6)
-    l5 = gmsh.model.geo.addLine(p6, p7)
-    l6 = gmsh.model.geo.addLine(p7, p8)
+    p7 = P(0, h-ro, "radius")
+    p8 = P(0, h/2, "web")
+    p9 = P(0, ro, "radius")
+    p1u = P(ro, h, "radius")
+    p2u = P(b, h, "flange")
+    p3u = P(b, h-t, "flange")
+    p4u = P(ro, h-t, "radius")
+    p5u = P(t, h-ro, "radius")
     # --- Arc centers ---
     c1 = P(t + ri, t + ri, "radius")
-    a1 = gmsh.model.geo.addCircleArc(p4, c1, p5)
-    a2 = gmsh.model.geo.addCircleArc(p8, c1, p1)
-    if do_list_entities and False:
-        list_entities()
-    loop = gmsh.model.geo.addCurveLoop([l1, l2, l3, a1, l4, l5, l6, a2])
+    c2 = P(t + ri, h - t - ri, "radius")
+    ct=[]
+    ct.append(gmsh.model.geo.addLine(p1, p2))
+    ct.append(gmsh.model.geo.addLine(p2, p3))
+    ct.append(gmsh.model.geo.addLine(p3, p4))
+    ct.append(gmsh.model.geo.addCircleArc(p4, c1, p5))
+    ct.append(gmsh.model.geo.addLine(p5, p6))
+    ct.append(gmsh.model.geo.addLine(p6, p5u))
+    ct.append(gmsh.model.geo.addCircleArc(p5u, c2, p4u))
+    ct.append(gmsh.model.geo.addLine(p4u, p3u))
+    ct.append(gmsh.model.geo.addLine(p3u, p2u))
+    ct.append(gmsh.model.geo.addLine(p2u, p1u))
+    ct.append(gmsh.model.geo.addCircleArc(p1u, c2, p7))
+    ct.append(gmsh.model.geo.addLine(p7, p8))
+    ct.append(gmsh.model.geo.addLine(p8, p9))
+    ct.append(gmsh.model.geo.addCircleArc(p9, c1, p1))
+    loop = gmsh.model.geo.addCurveLoop(ct)
     gmsh.model.geo.addPlaneSurface([loop])
-    gmsh.model.geo.synchronize()
-    entities  = gmsh.model.getEntities(dim=2)
-    # 3. Copy and Mirror (Symmetrize)
-    # Parameters for symmetrize: A, B, C, D
-    # representing plane Ax + By + Cz + D = 0
-    # For mirroring across the YZ-plane (x=0),
-    # the plane equation is 1x + 0y + 0z + 0 = 0
-    copy_tags = gmsh.model.geo.copy(entities)
-    gmsh.model.geo.symmetrize(copy_tags, 0, -1, 0, h/2)
-    # 4. Synchronize again to apply the symmetry
-    gmsh.model.geo.synchronize()
-    # 5. Remove duplicates at the symmetry line
-    ## (essential for a continuous mesh)
-    gmsh.model.mesh.removeDuplicateNodes()
     gmsh.model.geo.synchronize()
     all_surf=gmsh.model.getEntities(dim=2)
     surface_tags = [tag for dim, tag in all_surf]
@@ -226,20 +280,9 @@ def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     gmsh.model.addPhysicalGroup(2, surface_tags, 1)
     # --- Mesh generation ---
     gmsh.model.mesh.generate(2)
-    # --- Extract mesh ---
-    nodes = gmsh.model.mesh.getNodes()
-    node_coords = nodes[1].reshape(-1, 3)
-
-    elem_types, elem_tags, elem_node_tags = gmsh.model.mesh.getElements(2)
-
-    tri_cells = None
-    for etype, enodes in zip(elem_types, elem_node_tags):
-        if len(enodes) % 3 == 0:
-            tri_cells = np.array(enodes, int).reshape(-1, 3) - 1
-            break
-
     if do_list_entities:
         list_entities()
+    meshio_mesh = gmsh_to_meshio()
      # --- Optional PyVista plot ---
     if gmsh_plot:
         amp=mp[0,uc.order-1]
@@ -252,17 +295,13 @@ def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
                      ,scalars="Gmsh_gamma", clim=[0, 1], cmap="RdYlGn"
                      ,show_edges=True
                      ,opacity=0.8)
-        if nodes[0].shape[0]<1000:
+        if pv_mesh.n_points<1000:
             amp.add_points(pv_mesh.points,
                        color="red",
                        point_size=8,
                        render_points_as_spheres=True)
         mp.show()
     gmsh.finalize()
-    meshio_mesh = meshio.Mesh(
-        points=node_coords,
-        cells=[(uc.meshio_type, tri_cells)]
-    )
     sf_mesh=skio.from_meshio(meshio_mesh)
     return sf_mesh
 
@@ -311,34 +350,41 @@ def mplot(mesh: sf.mesh.Mesh, **fields):
     plotter.show()
     return pv_mesh
 
-def qtplot(uc, m: sf.mesh.Mesh,z:np.ndarray,
+def qtplot(uc, m: sf.mesh.Mesh,z:np.ndarray | None=None,
            scale=None, **kwargs):
-    max_disp = max(z.max(),-z.min())
-    # Apply scaled displacement to mesh
-    if scale==None or scale<0:
-        x_range = max(m.p[0])-min(m.p[0])
-        y_range = max(m.p[1])-min(m.p[1])
-        max_dim = max(x_range, y_range)
-        if scale==None:
-            scaler=0.1
-        else:
-            scaler=-scale
-        target_disp = scaler * max_dim
-        scale = target_disp / max_disp if max_disp > 0 else 1.0
-    # Create a diverging colormap centered at zero
-    cmap = plt.get_cmap("coolwarm")  # or "seismic", "RdBu", "PiYG", etc.
-    vmin=z.min()
-    vmax=z.max()
-    if vmin<0 and vmax>0:
-        # Normalize so that zero is white
-        norm = plt_colors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
+    just_mesh=False
+    p_title='warping'
+    if z is None or np.isnan(z).any():
+        sz=np.zeros_like(m.p[0])
+        just_mesh=True
+        p_title='mesh'
     else:
-        norm = plt_colors.Normalize(vmin=vmin, vmax=vmax)
-    colors = cmap(norm(z))[:, :3]  # Drop alpha channel
+        max_disp = max(z.max(),-z.min())
+        # Apply scaled displacement to mesh
+        if scale==None or scale<0:
+            x_range = max(m.p[0])-min(m.p[0])
+            y_range = max(m.p[1])-min(m.p[1])
+            max_dim = max(x_range, y_range)
+            if scale==None:
+                scaler=0.1
+            else:
+                scaler=-scale
+            target_disp = scaler * max_dim
+            scale = target_disp / max_disp if max_disp > 0 else 1.0
+        # Create a diverging colormap centered at zero
+        cmap = plt.get_cmap("coolwarm")  # or "seismic", "RdBu", "PiYG", etc.
+        vmin=z.min()
+        vmax=z.max()
+        if vmin<0 and vmax>0:
+            # Normalize so that zero is white
+            norm = plt_colors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
+        else:
+            norm = plt_colors.Normalize(vmin=vmin, vmax=vmax)
+        colors = cmap(norm(z))[:, :3]  # Drop alpha channel
+        sz=scale*z
     triangles=m.t.T
     x=m.p[0]
     y=m.p[1]
-    sz=scale*z
     points = np.column_stack([x, y, sz])
     faces = np.hstack(
         [np.c_[np.full(len(triangles), 3), triangles]]).astype(np.int32)
@@ -347,20 +393,30 @@ def qtplot(uc, m: sf.mesh.Mesh,z:np.ndarray,
         uc.mp.clear()
     except AttributeError as e:
         logging.debug(f"First run {e}")
-    uc.mp.add_mesh(mesh,
-                     scalars=colors,rgb=True,
-                     scalar_bar_args={"title": f"Warping for {uc.name}"},
-                     show_edges=True)
-    uc.mp.show_bounds(
-        grid='back',
-        location='outer',
-        ticks='both',
-        xtitle='X[mm]',
-        ytitle='Y[mm]',
-        fmt="%.0f",
-        ztitle='warping'
-    )
-    uc.mp.add_text(f"""{uc.name} {mesh.n_points} points
+    if just_mesh:
+        uc.mp.add_mesh(mesh,
+                         show_edges=True)
+        uc.mp.add_text(f"""{uc.name} {mesh.n_points} points""",
+                       font_size=12)
+        uc.mp.add_points(points,
+                   color="red",
+                   point_size=8,
+                   render_points_as_spheres=True)
+    else:
+        uc.mp.add_mesh(mesh,
+                         scalars=colors,rgb=True,
+                         scalar_bar_args={"title": f"{p_title} for {uc.name}"},
+                         show_edges=True)
+        uc.mp.show_bounds(
+            grid='back',
+            location='outer',
+            ticks='both',
+            xtitle='X[mm]',
+            ytitle='Y[mm]',
+            fmt="%.0f",
+            ztitle=p_title
+        )
+        uc.mp.add_text(f"""{uc.name} {mesh.n_points} points
 scale={scale:.4G}, max warping={max_disp:.4G}
 """, font_size=12)
     uc.mp.render()
@@ -470,7 +526,7 @@ if not do_qtplot and not gmsh_plot:
         mp=globals()["mp"]
         mp.close()
         del(mp)
-r=0
+r=gmsh_slot
 c=0
 for model in models:
     for nc in (10,):
@@ -482,14 +538,14 @@ for model in models:
             types.SimpleNamespace(elem=sf.ElementTriP1()),
             #types.SimpleNamespace(elem=sf.ElementTriP1B()),
             #types.SimpleNamespace(elem=sf.ElementTriP1G()),
-            #types.SimpleNamespace(elem=sf.ElementTriP2()),
+            types.SimpleNamespace(elem=sf.ElementTriP2()),
             #types.SimpleNamespace(elem=sf.ElementTriP2B()),
             #types.SimpleNamespace(elem=sf.ElementTriP2G()),
             #types.SimpleNamespace(elem=sf.ElementTriP3()),
             #types.SimpleNamespace(elem=sf.ElementTriP4()),
              ]
-        rows = math.ceil((len(ucs) * len(models)+gmsh_slot)/ 2)
-        if do_qtplot:
+        rows = math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2)
+        if do_qtplot or gmsh_plot:
             start_mp(rows=rows)
         if do_tsplot:
             fig = pyplot.figure(num='warping using skfem',clear=True)
@@ -529,16 +585,12 @@ for model in models:
                     case Model.U:
                         x_nodes=nc
                         y_nodes=nc
-                        qtplot_scale=0
-                        if gmsh_plot:
-                            start_mp(rows=1)
+                        qtplot_scale=-0.1
                         mesh = u_mesh(uc
                                       ,mesh_scale*0.1
                                       ,mesh_scale*0.05
                                       ,mesh_scale*0.004
                                       ,mesh_scale*0.004)
-                        if gmsh_plot:
-                            c=c+1
                     case _:
                         raise ValueError(f"model {model} is not supported")
                 print(f'Model={model}, nvertices={mesh.nvertices}')
@@ -548,8 +600,7 @@ for model in models:
                     uc.ax=fig.add_subplot(rows,
                                           2, r * 2 + c + 1,
                                           projection="3d")
-                if do_qtplot:
-                    uc.mp=mp[r,c]
+                uc.mp=mp[r,c]
                 if c==1:
                     c=0
                     r=r+1
@@ -560,7 +611,7 @@ for model in models:
                     if do_sp:
                         m4=mesh_scale**4
                         m6=mesh_scale**6
-                        print(f'''Section properties
+                        print(f'''Section properties using {uc.name}
   area={uc.sp['area']/(mesh_scale**2):.4G}
   c=[{uc.sp['c'][0]/mesh_scale:.4G},{uc.sp['c'][1]/mesh_scale:.4G}]
   ic=[{uc.sp['ic'][0]/m4:.4G}, \
@@ -570,20 +621,21 @@ for model in models:
   gamma={uc.sp['gamma']/m6:.4G}
 ''')
                 if do_qtplot or do_tsplot:
-                    (m,z)=uc.basis.refinterp(uc.S,nrefs=1)
+                    (m,z)=uc.basis.refinterp(uc.S,nrefs=0)
                     if np.isnan(z).any():
+                        qtplot(uc,mesh,None)
                         print(f'Solution failed for {uc.name}')
                         continue
+                    if do_qtplot:
+                        qtplot(uc,m,z,scale=qtplot_scale)
                     print((f'{uc.name}: max_warping ='
                            f' {(z.max()-z.min())/2:.4G}'))
                     if do_tsplot:
                         tsplot(uc,m,z)
-                    if do_qtplot:
-                        qtplot(uc,m,z,scale=qtplot_scale)
             except Exception:
-                import traceback
                 print(f'Solution failed for {uc.name}')
                 traceback.print_exc()
+                qtplot(uc,mesh,None)
 # %%  Saint‑Venant
 # warping (ω): Laplace = 0
 # \nabla ^2\omega =0,\qquad \frac{\partial \omega }{\partial n}=yn_x-xn_y.
