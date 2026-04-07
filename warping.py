@@ -209,6 +209,113 @@ def gmsh_to_meshio():
         cell_data={"gmsh:physical": phys_data}
     )
 
+def rhs_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
+    """
+    Generates an RHS profile using Boolean operations for 2D rounding.
+    """
+    gmsh.initialize()
+    gmsh.option.setNumber("General.Verbosity", 3)
+    gmsh.model.add("RHS_Profile")
+    occ = gmsh.model.occ
+
+    ro = ri + t
+
+    # Helper function for a rounded rectangle surface
+    def get_rounded_rect(width, height, radius, x_off, y_off):
+        # Base rectangle
+        rect = occ.addRectangle(x_off + radius, y_off, 0,
+                               width - 2*radius, height)
+        rect2 = occ.addRectangle(x_off, y_off + radius, 0,
+                                width, height - 2*radius)
+        # Corners
+        c1 = occ.addDisk(x_off + radius, y_off + radius, 0, radius, radius)
+        c2 = occ.addDisk(x_off + width - radius,
+                         y_off + radius, 0, radius, radius)
+        c3 = occ.addDisk(x_off + width - radius, y_off + height - radius,
+                         0, radius, radius)
+        c4 = occ.addDisk(x_off + radius, y_off + height - radius,
+                         0, radius, radius)
+
+        # Boolean Union (Fuse) everything into one surface
+        res, _ = occ.fuse([(2, rect), (2, rect2)],
+                          [(2, c1), (2, c2), (2, c3), (2, c4)])
+        return res
+
+    # Create outer and inner surfaces
+    outer_surf = get_rounded_rect(b, h, ro, 0, 0)
+    inner_surf = get_rounded_rect(b - 2*t, h - 2*t, ri, t, t)
+
+    # Boolean Difference (Cut): Outer - Inner
+    final_surf, _ = occ.cut(outer_surf, inner_surf)
+    occ.synchronize()
+
+    # Physical Groups
+    # Surface
+    surf_tag = [tag for dim, tag in final_surf]
+    gmsh.model.addPhysicalGroup(2, surf_tag, name="RHS_Surface")
+
+    # Boundaries (Automatic detection via Bounding Box)
+    curves = gmsh.model.getEntities(1)
+    outer_c, inner_c = [], []
+    eps = 1e-6
+    for dim, tag in curves:
+        xmin, ymin, _, xmax, ymax, _ = gmsh.model.getBoundingBox(dim, tag)
+        if xmin < eps or xmax > b - eps or ymin < eps or ymax > h - eps:
+            outer_c.append(tag)
+        else:
+            inner_c.append(tag)
+
+    gmsh.model.addPhysicalGroup(1, outer_c, name="Outer_Boundary")
+    gmsh.model.addPhysicalGroup(1, inner_c, name="Inner_Boundary")
+
+    pt_tags = [float(p[1]) for p in gmsh.model.getEntities(0)]
+
+    # Refinement Fields
+    f_dist = gmsh.model.mesh.field.add("Distance")
+    # Tags must be passed as a list of doubles/floats
+    gmsh.model.mesh.field.setNumbers(f_dist, "PointsList", pt_tags)
+
+    f_thres = gmsh.model.mesh.field.add("Threshold")
+    gmsh.model.mesh.field.setNumber(f_thres, "InField", f_dist)
+    gmsh.model.mesh.field.setNumber(f_thres, "SizeMin", t / 3)
+    gmsh.model.mesh.field.setNumber(f_thres, "SizeMax", b / 10)
+    gmsh.model.mesh.field.setNumber(f_thres, "DistMin", ro)
+    gmsh.model.mesh.field.setNumber(f_thres, "DistMax", ro)
+    gmsh.model.mesh.field.setAsBackgroundMesh(f_thres)
+
+    # 5. Mesh Configuration
+    if uc.quad:
+        gmsh.option.setNumber("Mesh.RecombineAll", 1)
+        gmsh.option.setNumber("Mesh.Algorithm", 8)
+    gmsh.option.setNumber("Mesh.ElementOrder", uc.order)
+
+    gmsh.model.mesh.generate(2)
+    if do_list_entities:
+        list_entities()
+    meshio_mesh = gmsh_to_meshio()
+     # --- Optional PyVista plot ---
+    if gmsh_plot:
+        amp=mp[0,uc.order-1]
+        amp.clear()
+        amp.add_text(f'gmsh mesh for RHS using {uc.name}, order={uc.order}'
+                      ,font_size=12)
+        pv_mesh = gmsh_to_pyvista()
+        smooth_mesh = pv_mesh.tessellate(max_n_subdivide=2)
+        amp.add_mesh(smooth_mesh
+                     ,scalars="Gmsh_gamma", clim=[0, 1], cmap="RdYlGn"
+                     ,show_edges=True
+                     ,opacity=0.8)
+        if pv_mesh.n_points<1000:
+            amp.add_points(pv_mesh.points,
+                       color="red",
+                       point_size=8,
+                       render_points_as_spheres=True)
+        mp.show()
+    gmsh.finalize()
+    sf_mesh=skio.from_meshio(meshio_mesh)
+    return sf_mesh
+
+
 def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     """
     Generate a thin-walled U-section with inner corner radius.
@@ -507,8 +614,9 @@ class Model(enum.Enum):
     SQUARE=1
     RECTANGLE=2
     U=3
+    RHS=4
 models=list(Model)
-models=(Model.U,)
+models=(Model.RHS,)
 do_tsplot=False
 do_qtplot=True
 do_sp=True
@@ -583,14 +691,19 @@ for model in models:
                             mesh_scale*np.linspace(0, 0.01, y_nodes)
                         )
                     case Model.U:
-                        x_nodes=nc
-                        y_nodes=nc
                         qtplot_scale=-0.1
                         mesh = u_mesh(uc
                                       ,mesh_scale*0.1
                                       ,mesh_scale*0.05
                                       ,mesh_scale*0.004
                                       ,mesh_scale*0.004)
+                    case Model.RHS:
+                        qtplot_scale=-0.1
+                        mesh = rhs_mesh(uc
+                                      ,mesh_scale*0.15
+                                      ,mesh_scale*0.15
+                                      ,mesh_scale*0.008
+                                      ,mesh_scale*0.008)
                     case _:
                         raise ValueError(f"model {model} is not supported")
                 print(f'Model={model}, nvertices={mesh.nvertices}')
@@ -635,7 +748,8 @@ for model in models:
             except Exception:
                 print(f'Solution failed for {uc.name}')
                 traceback.print_exc()
-                qtplot(uc,mesh,None)
+                if hasattr(uc,'mp'):
+                    qtplot(uc,mesh,None)
 # %%  Saint‑Venant
 # warping (ω): Laplace = 0
 # \nabla ^2\omega =0,\qquad \frac{\partial \omega }{\partial n}=yn_x-xn_y.
