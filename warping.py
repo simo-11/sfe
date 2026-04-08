@@ -7,10 +7,11 @@ Assisted by Microsoft Copilot and Google Search AI
 Provides framework for testing various elements and processes for
 solution of warping function and cross section properties.
 Supported elements are linear and quadratic triangles.
-Supported sections are square, rectangle and U
+Supported sections are square, rectangle, RSH and U.
+Main target is SHS.
 
 TODO:
-    support for RSH with rounded corners
+
 
 For a ready solution and tested solution
 see https://sectionproperties.readthedocs.io/
@@ -111,13 +112,14 @@ def gmsh_to_pyvista():
     gmsh_gamma = []      # To store quality
     gmsh_distortion = [] # To store distortion
     # Map Gmsh element types to VTK cell types
-    # 2: Tri3, 9: Tri6, 3: Quad4, 16: Quad8, 10: Quad9
     mapping = {
         2:  (3, vtk.VTK_TRIANGLE),
         9:  (6, vtk.VTK_QUADRATIC_TRIANGLE),
+        21: (10, vtk.VTK_LAGRANGE_TRIANGLE),
         3:  (4, vtk.VTK_QUAD),
         16: (8, vtk.VTK_QUADRATIC_QUAD),
-        10: (9, vtk.VTK_LAGRANGE_QUADRILATERAL)
+        10: (9, vtk.VTK_LAGRANGE_QUADRILATERAL,),
+        36: (16, vtk.VTK_LAGRANGE_QUADRILATERAL),
     }
 
     for etype, etags, enodes in zip(elem_types, elem_tags, elem_node_tags):
@@ -154,19 +156,24 @@ def gmsh_to_pyvista():
 
     return pv_mesh
 
+def gmsh_type_to_meshio_type(gtype):
+    replacements = {
+        "quadrilateral": "quad",
+        "tetrahedron": "tetra",
+        "hexahedron": "hexa"
+    }
+    for old, new in replacements.items():
+        gtype = gtype.replace(old, new)
+    gtype=gtype.replace(" ","")
+    return gtype
+
 def gmsh_to_meshio():
     # Mapping Gmsh element names to meshio types
     m_map = {
         "triangle 3": "triangle",
         "quadrilateral 4": "quad",
-        "triangle 6": "triangle6",
-        "quadrilateral 8": "quad8",
-        "quadrilateral 9": "quad9",
         "tetrahedron 4": "tetra",
-        "tetrahedron 10": "tetra10",
         "hexahedron 8": "hexa",
-        "hexahedron 20": "hexa20",
-        "hexahedron 27": "hexa27"
     }
 
     # 1. Collect elements and identify active nodes
@@ -178,7 +185,8 @@ def gmsh_to_meshio():
 
         for etype, enodes in zip(e_types, e_nodes):
             prop = gmsh.model.mesh.getElementProperties(etype)
-            m_type = m_map.get(prop[0].lower(), prop[0].lower())
+            m_type = m_map.get(prop[0].lower(),
+                               gmsh_type_to_meshio_type(prop[0].lower()))
             n_nodes = prop[3]
 
             idx_block = enodes.reshape(-1, n_nodes)
@@ -646,10 +654,10 @@ for model in models:
             types.SimpleNamespace(elem=sf.ElementTriP1()),
             #types.SimpleNamespace(elem=sf.ElementTriP1B()),
             #types.SimpleNamespace(elem=sf.ElementTriP1G()),
-            types.SimpleNamespace(elem=sf.ElementTriP2()),
+            #types.SimpleNamespace(elem=sf.ElementTriP2()),
             #types.SimpleNamespace(elem=sf.ElementTriP2B()),
             #types.SimpleNamespace(elem=sf.ElementTriP2G()),
-            #types.SimpleNamespace(elem=sf.ElementTriP3()),
+            types.SimpleNamespace(elem=sf.ElementTriP3()),
             #types.SimpleNamespace(elem=sf.ElementTriP4()),
              ]
         rows = math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2)
@@ -664,6 +672,9 @@ for model in models:
                 uc.quad=False
                 uc.serendipity=False
                 match uc.name:
+                    case s if s.startswith('TriP3'):
+                        uc.order=3
+                        uc.meshio_type="tri6"
                     case s if s.startswith('TriP2'):
                         uc.order=2
                         uc.meshio_type="tri6"
