@@ -684,13 +684,10 @@ for model in models:
                 match uc.name:
                     case s if s.startswith('TriP3'):
                         uc.order=3
-                        uc.meshio_type="tri6"
                     case s if s.startswith('TriP2'):
                         uc.order=2
-                        uc.meshio_type="tri6"
                     case s if s.startswith('TriP1'):
                         uc.order=1
-                        uc.meshio_type="triangle"
                     case _:
                         raise ValueError(f"Element {uc.name} is"
                                          "not supported")
@@ -715,7 +712,7 @@ for model in models:
                         uc.basis=sf.Basis(mesh, uc.elem)
                     case Model.U:
                         qtplot_scale=-0.1
-                        basis = u_mesh(uc
+                        uc.basis = u_mesh(uc
                                       ,mesh_scale*0.1
                                       ,mesh_scale*0.05
                                       ,mesh_scale*0.004
