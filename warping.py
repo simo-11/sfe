@@ -320,9 +320,7 @@ def rhs_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
                        render_points_as_spheres=True)
         mp.show()
     gmsh.finalize()
-    sf_mesh=skio.from_meshio(meshio_mesh)
-    return sf_mesh
-
+    return get_basis(uc,meshio_mesh)
 
 def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     """
@@ -417,8 +415,20 @@ def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
                        render_points_as_spheres=True)
         mp.show()
     gmsh.finalize()
-    sf_mesh=skio.from_meshio(meshio_mesh)
-    return sf_mesh
+    return get_basis(uc,meshio_mesh)
+
+def get_basis(uc,meshio_mesh):
+    match uc.name:
+        case s if s.startswith('TriP3'):
+            points = meshio_mesh.points[:, :2].T  # (2, n_nodes)
+            cells = meshio_mesh.cells_dict["triangle10"]  # (n_elements, 10)
+            mesh = sf.MeshTri(points, cells[:, :3].T)
+            mapping = sf.MappingIsoparametric(mesh, uc.elem, cells.T)
+            basis = sf.Basis(mesh, uc.elem, mapping=mapping)
+        case _:
+            sf_mesh=skio.from_meshio(meshio_mesh)
+            basis=sf.Basis(sf_mesh, uc.elem)
+    return basis
 
 def tsplot(uc,m: sf.mesh.Mesh,z:np.ndarray):
     ax=uc.ax
@@ -693,6 +703,7 @@ for model in models:
                             mesh_scale*np.linspace(0, 0.1, x_nodes),
                             mesh_scale*np.linspace(0, 0.1, y_nodes)
                         )
+                        uc.basis=sf.Basis(mesh, uc.elem)
                     case Model.RECTANGLE:
                         x_nodes=nc
                         y_nodes=nc
@@ -701,16 +712,17 @@ for model in models:
                             mesh_scale*np.linspace(0, 0.1, x_nodes),
                             mesh_scale*np.linspace(0, 0.01, y_nodes)
                         )
+                        uc.basis=sf.Basis(mesh, uc.elem)
                     case Model.U:
                         qtplot_scale=-0.1
-                        mesh = u_mesh(uc
+                        basis = u_mesh(uc
                                       ,mesh_scale*0.1
                                       ,mesh_scale*0.05
                                       ,mesh_scale*0.004
                                       ,mesh_scale*0.004)
                     case Model.RHS:
                         qtplot_scale=-0.1
-                        mesh = rhs_mesh(uc
+                        uc.basis = rhs_mesh(uc
                                       ,mesh_scale*0.15
                                       ,mesh_scale*0.15
                                       ,mesh_scale*0.008
@@ -718,7 +730,6 @@ for model in models:
                     case _:
                         raise ValueError(f"model {model} is not supported")
                 print(f'Model={model}, nvertices={mesh.nvertices}')
-                uc.basis=sf.Basis(mesh, uc.elem)
                 uc.scale=mesh_scale
                 if do_tsplot:
                     uc.ax=fig.add_subplot(rows,
