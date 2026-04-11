@@ -561,6 +561,7 @@ def solve(uc):
     # Fix the constant at random point, scale later
     D = uc.t_basis.split_indices()[0][[0]]
     A, b = sf.enforce(A, b,D=D)
+    uc.A=A
     uc.S = sf.solve(A, b)
 
 def sp(uc):
@@ -624,7 +625,8 @@ def sp(uc):
     iww=i_ww.assemble(uc.t_basis, uh=uc.t_basis.interpolate(uc.S))
     gamma=iww-iw*iw/area-scy*xw+scx*yw
     sp["gamma"]=gamma
-    #sp["j"]=j
+    # optimise order as uc.A is sparse matrix
+    sp["j"]=ixx+iyy-(uc.S@(uc.A@uc.S))
     sp["sc"]=[cx+scx,cy+scy]
     uc.sp=sp
 
@@ -751,7 +753,7 @@ for model in models:
 {uc.sp['ic'][2]/m4:.4G}]
   sc=[{uc.sp['sc'][0]/mesh_scale:.4G},{uc.sp['sc'][1]/mesh_scale:.4G}]
   gamma={uc.sp['gamma']/m6:.4G}
-''')
+  j={uc.sp['j']/m4:.4G}''')
                 if do_qtplot or do_tsplot:
                     (m,z)=uc.basis.refinterp(uc.S,nrefs=0)
                     if np.isnan(z).any():
