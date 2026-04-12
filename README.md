@@ -41,6 +41,7 @@ for all used ones at least Debugger and IPython
 
 Dependencies can be installed using pip
  * spyder-kernels - needed for spyder integration
+ * spyder-unittest - helps running scikit-fem tests with debugger
  * scikit-fem - main target for this repo, requires numpy and scipy [all] also brings also matplotlib
  * gmsh - geometry and mesh definitions
  * pyvistaqt pyqt5 - requires pyvista and qtpy
