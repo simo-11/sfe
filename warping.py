@@ -217,6 +217,53 @@ def gmsh_to_meshio():
         cell_data={"gmsh:physical": phys_data}
     )
 
+def finalize_mesh(uc):
+    # 5. Mesh Configuration
+    if uc.quad:
+        gmsh.option.setNumber("Mesh.RecombineAll", 1)
+        gmsh.option.setNumber("Mesh.Algorithm", 8)
+    gmsh.option.setNumber("Mesh.ElementOrder", uc.order)
+    gmsh.model.mesh.generate(2)
+    if do_list_entities:
+        list_entities()
+    meshio_mesh = gmsh_to_meshio()
+     # --- Optional PyVista plot ---
+    if gmsh_plot:
+        amp=mp[0,min(uc.order-1,1)]
+        amp.clear()
+        amp.add_text(('gmsh mesh for '
+                      f'{uc.model} using {uc.name}, order={uc.order}')
+                      ,font_size=12)
+        pv_mesh = gmsh_to_pyvista()
+        smooth_mesh = pv_mesh.tessellate(max_n_subdivide=2)
+        amp.add_mesh(smooth_mesh
+                     ,scalars="Gmsh_gamma", clim=[0, 1], cmap="RdYlGn"
+                     ,show_edges=True
+                     ,opacity=0.8)
+        if pv_mesh.n_points<1000:
+            amp.add_points(pv_mesh.points,
+                       color="red",
+                       point_size=8,
+                       render_points_as_spheres=True)
+        mp.show()
+    gmsh.finalize()
+    return get_basis(uc,meshio_mesh)
+
+def rect_mesh(uc, h=0.1, b=0.1):
+    """
+    Generates an RHS profile using Boolean operations for 2D rounding.
+    """
+    ms=uc.order*min(h,b)
+    gmsh.initialize()
+    gmsh.option.setNumber("General.Verbosity", 3)
+    gmsh.option.setNumber("Mesh.MeshSizeMin", ms)
+    gmsh.option.setNumber("Mesh.MeshSizeMax", ms)
+    gmsh.model.add("rect")
+    occ = gmsh.model.occ
+    occ.addRectangle(0, 0, 0, b, h)
+    occ.synchronize()
+    return finalize_mesh(uc)
+
 def rhs_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     """
     Generates an RHS profile using Boolean operations for 2D rounding.
@@ -290,37 +337,7 @@ def rhs_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     gmsh.model.mesh.field.setNumber(f_thres, "DistMin", ro)
     gmsh.model.mesh.field.setNumber(f_thres, "DistMax", ro)
     gmsh.model.mesh.field.setAsBackgroundMesh(f_thres)
-
-    # 5. Mesh Configuration
-    if uc.quad:
-        gmsh.option.setNumber("Mesh.RecombineAll", 1)
-        gmsh.option.setNumber("Mesh.Algorithm", 8)
-    gmsh.option.setNumber("Mesh.ElementOrder", uc.order)
-
-    gmsh.model.mesh.generate(2)
-    if do_list_entities:
-        list_entities()
-    meshio_mesh = gmsh_to_meshio()
-     # --- Optional PyVista plot ---
-    if gmsh_plot:
-        amp=mp[0,uc.order-1]
-        amp.clear()
-        amp.add_text(f'gmsh mesh for RHS using {uc.name}, order={uc.order}'
-                      ,font_size=12)
-        pv_mesh = gmsh_to_pyvista()
-        smooth_mesh = pv_mesh.tessellate(max_n_subdivide=2)
-        amp.add_mesh(smooth_mesh
-                     ,scalars="Gmsh_gamma", clim=[0, 1], cmap="RdYlGn"
-                     ,show_edges=True
-                     ,opacity=0.8)
-        if pv_mesh.n_points<1000:
-            amp.add_points(pv_mesh.points,
-                       color="red",
-                       point_size=8,
-                       render_points_as_spheres=True)
-        mp.show()
-    gmsh.finalize()
-    return get_basis(uc,meshio_mesh)
+    return finalize_mesh(uc)
 
 def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     """
@@ -330,7 +347,6 @@ def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 3)
     gmsh.model.add("u_section")
-    gmsh.option.setNumber("Mesh.ElementOrder", uc.order)
 # --- Local mesh sizes ---
     lc_radius = 0.5*ri
     lc_web = 4*t
@@ -382,52 +398,20 @@ def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     gmsh.model.geo.synchronize()
     all_surf=gmsh.model.getEntities(dim=2)
     surface_tags = [tag for dim, tag in all_surf]
-    if uc.quad:
-        gmsh.model.mesh.setRecombine(2, all_surf)
-        # Full 9-node quad (etype 10)
-        if not uc.serendipity:
-            gmsh.option.setNumber("Mesh.SecondOrderLinear", 0)
-        # Serendipity 8-node quad (etype 16)
-        else:
-            gmsh.option.setNumber("Mesh.SecondOrderLinear", 1)
     gmsh.model.addPhysicalGroup(2, surface_tags, 1)
-    # --- Mesh generation ---
-    gmsh.model.mesh.generate(2)
-    if do_list_entities:
-        list_entities()
-    meshio_mesh = gmsh_to_meshio()
-     # --- Optional PyVista plot ---
-    if gmsh_plot:
-        amp=mp[0,uc.order-1]
-        amp.clear()
-        amp.add_text(f'gmsh mesh for U using {uc.name}, order={uc.order}'
-                      ,font_size=12)
-        pv_mesh = gmsh_to_pyvista()
-        smooth_mesh = pv_mesh.tessellate(max_n_subdivide=2)
-        amp.add_mesh(smooth_mesh
-                     ,scalars="Gmsh_gamma", clim=[0, 1], cmap="RdYlGn"
-                     ,show_edges=True
-                     ,opacity=0.8)
-        if pv_mesh.n_points<1000:
-            amp.add_points(pv_mesh.points,
-                       color="red",
-                       point_size=8,
-                       render_points_as_spheres=True)
-        mp.show()
-    gmsh.finalize()
-    return get_basis(uc,meshio_mesh)
+    return finalize_mesh(uc)
 
 def get_basis(uc,meshio_mesh):
     match uc.name:
         case s if s.startswith('TriP3'):
             points = meshio_mesh.points[:, :2].T  # (2, n_nodes)
             cells = meshio_mesh.cells_dict["triangle10"]  # (n_elements, 10)
-            mesh = sf.MeshTri(points, cells[:, :3].T)
-            mapping = sf.MappingIsoparametric(mesh, uc.elem, cells.T)
-            basis = sf.Basis(mesh, uc.elem, mapping=mapping)
+            uc.mesh = sf.MeshTri(points, cells[:, :3].T)
+            mapping = sf.MappingIsoparametric(uc.mesh, uc.elem, cells.T)
+            basis = sf.Basis(uc.mesh, uc.elem, mapping=mapping)
         case _:
-            sf_mesh=skio.from_meshio(meshio_mesh)
-            basis=sf.Basis(sf_mesh, uc.elem)
+            uc.mesh=skio.from_meshio(meshio_mesh)
+            basis=sf.Basis(uc.mesh, uc.elem)
     return basis
 
 def tsplot(uc,m: sf.mesh.Mesh,z:np.ndarray):
@@ -600,8 +584,8 @@ def sp(uc):
     ixy=i_xy.assemble(uc.basis)
     sp["c"]=[cx,cy]
     sp["ic"]=[ixx,iyy,ixy]
-    p = mesh.p.copy()
-    t = mesh.t.copy()
+    p = uc.mesh.p.copy()
+    t = uc.mesh.t.copy()
     p = p + np.array([[-cx], [-cy]])
     uc.t_mesh=sf.MeshTri(p,t)
     solve(uc)
@@ -636,7 +620,7 @@ class Model(enum.Enum):
     U=3
     RHS=4
 models=list(Model)
-models=(Model.RHS,)
+models=(Model.SQUARE,)
 do_tsplot=False
 do_qtplot=True
 do_sp=True
@@ -679,6 +663,7 @@ for model in models:
             fig = pyplot.figure(num='warping using skfem',clear=True)
             pyplot.tight_layout()
         for uc in ucs:
+            uc.model=model
             try:
                 uc.name=type(uc.elem).__name__.split('Element')[-1]
                 uc.quad=False
@@ -695,23 +680,13 @@ for model in models:
                                          "not supported")
                 match model:
                     case Model.SQUARE:
-                        x_nodes=nc
-                        y_nodes=nc
-                        qtplot_scale=-0.3
-                        mesh = sf.MeshTri.init_tensor(
-                            mesh_scale*np.linspace(0, 0.1, x_nodes),
-                            mesh_scale*np.linspace(0, 0.1, y_nodes)
-                        )
-                        uc.basis=sf.Basis(mesh, uc.elem)
+                        uc.basis = rect_mesh(uc
+                                      ,mesh_scale*0.1
+                                      ,mesh_scale*0.1)
                     case Model.RECTANGLE:
-                        x_nodes=nc
-                        y_nodes=nc
-                        qtplot_scale=-0.1
-                        mesh = sf.MeshTri.init_tensor(
-                            mesh_scale*np.linspace(0, 0.1, x_nodes),
-                            mesh_scale*np.linspace(0, 0.01, y_nodes)
-                        )
-                        uc.basis=sf.Basis(mesh, uc.elem)
+                        uc.basis = rect_mesh(uc
+                                      ,mesh_scale*0.1
+                                      ,mesh_scale*0.01)
                     case Model.U:
                         qtplot_scale=-0.1
                         uc.basis = u_mesh(uc
@@ -728,7 +703,7 @@ for model in models:
                                       ,mesh_scale*0.008)
                     case _:
                         raise ValueError(f"model {model} is not supported")
-                print(f'Model={model}, nvertices={mesh.nvertices}')
+                print(f'Model={uc.model}, nvertices={uc.mesh.nvertices}')
                 uc.scale=mesh_scale
                 if do_tsplot:
                     uc.ax=fig.add_subplot(rows,
@@ -757,7 +732,7 @@ for model in models:
                 if do_qtplot or do_tsplot:
                     (m,z)=uc.basis.refinterp(uc.S,nrefs=0)
                     if np.isnan(z).any():
-                        qtplot(uc,mesh,None)
+                        qtplot(uc,uc.mesh,None)
                         print(f'Solution failed for {uc.name}')
                         continue
                     if do_qtplot:
@@ -767,10 +742,10 @@ for model in models:
                     if do_tsplot:
                         tsplot(uc,m,z)
             except Exception:
-                print(f'Solution failed for {uc.name}')
+                print(f'Exception for {uc.name}')
                 traceback.print_exc()
                 if hasattr(uc,'mp'):
-                    qtplot(uc,mesh,None)
+                    qtplot(uc,uc.mesh,None)
 # %%  Saint‑Venant
 # warping (ω): Laplace = 0
 # \nabla ^2\omega =0,\qquad \frac{\partial \omega }{\partial n}=yn_x-xn_y.
