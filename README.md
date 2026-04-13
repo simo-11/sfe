@@ -41,14 +41,14 @@ for all used ones at least Debugger and IPython
 
 Dependencies can be installed using pip
  * spyder-kernels - needed for spyder integration
- * spyder-unittest - helps running scikit-fem tests with debugger
  * scikit-fem - main target for this repo, requires numpy and scipy [all] also brings also matplotlib
  * gmsh - geometry and mesh definitions
  * pyvistaqt pyqt5 - requires pyvista and qtpy
+ * pytest spyder-unittest - helps running scikit-fem tests with debugger, as noted in https://docs.spyder-ide.org/current/plugins/unittest.html this combination is not working currently
 
 Typical command needed after update of python is (uv in front if it is used)
 ```
-uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh
+uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh pytest spyder-unittest
 ```
 
 ## Using sfe
