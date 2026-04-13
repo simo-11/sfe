@@ -251,9 +251,9 @@ def finalize_mesh(uc):
 
 def rect_mesh(uc, h=0.1, b=0.1):
     """
-    Generates an RHS profile using Boolean operations for 2D rounding.
+    Generates an rectangle
     """
-    ms=uc.order*min(h,b)
+    ms=np.sqrt(0.003*uc.order)*(max(h,b)+3*min(h,b))/4
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 3)
     gmsh.option.setNumber("Mesh.MeshSizeMin", ms)
@@ -261,6 +261,23 @@ def rect_mesh(uc, h=0.1, b=0.1):
     gmsh.model.add("rect")
     occ = gmsh.model.occ
     occ.addRectangle(0, 0, 0, b, h)
+    occ.synchronize()
+    return finalize_mesh(uc)
+
+def ellipse_mesh(uc, rx=0.1, ry=0.1):
+    """
+    Generates an ellipse.
+    """
+    ms=np.sqrt(0.003*uc.order)*(max(rx,ry)+3*min(rx,ry))/2
+    ms=2*rx
+    gmsh.initialize()
+    gmsh.option.setNumber("General.Verbosity", 3)
+    gmsh.option.setNumber("Mesh.MeshSizeMin", ms)
+    gmsh.option.setNumber("Mesh.MeshSizeMax", ms)
+    gmsh.model.add("ellipse")
+    occ = gmsh.model.occ
+    disk = occ.add_disk(0, 0, 0, 1.0, 1.0)
+    occ.dilate([(2, disk)], 0, 0, 0, rx, ry, 1.0)
     occ.synchronize()
     return finalize_mesh(uc)
 
@@ -619,8 +636,9 @@ class Model(enum.Enum):
     RECTANGLE=2
     U=3
     RHS=4
+    CIRCLE=5
 models=list(Model)
-models=(Model.SQUARE,)
+models=(Model.CIRCLE,)
 do_tsplot=False
 do_qtplot=True
 do_sp=True
@@ -650,10 +668,10 @@ for model in models:
             types.SimpleNamespace(elem=sf.ElementTriP1()),
             #types.SimpleNamespace(elem=sf.ElementTriP1B()),
             #types.SimpleNamespace(elem=sf.ElementTriP1G()),
-            #types.SimpleNamespace(elem=sf.ElementTriP2()),
+            types.SimpleNamespace(elem=sf.ElementTriP2()),
             #types.SimpleNamespace(elem=sf.ElementTriP2B()),
             #types.SimpleNamespace(elem=sf.ElementTriP2G()),
-            types.SimpleNamespace(elem=sf.ElementTriP3()),
+            #types.SimpleNamespace(elem=sf.ElementTriP3()),
             #types.SimpleNamespace(elem=sf.ElementTriP4()),
              ]
         rows = math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2)
@@ -668,6 +686,7 @@ for model in models:
                 uc.name=type(uc.elem).__name__.split('Element')[-1]
                 uc.quad=False
                 uc.serendipity=False
+                qtplot_scale=-0.1
                 match uc.name:
                     case s if s.startswith('TriP3'):
                         uc.order=3
@@ -680,7 +699,13 @@ for model in models:
                                          "not supported")
                 match model:
                     case Model.SQUARE:
+                        qtplot_scale=-0.3
                         uc.basis = rect_mesh(uc
+                                      ,mesh_scale*0.1
+                                      ,mesh_scale*0.1)
+                    case Model.CIRCLE:
+                        qtplot_scale=-0.3
+                        uc.basis = ellipse_mesh(uc
                                       ,mesh_scale*0.1
                                       ,mesh_scale*0.1)
                     case Model.RECTANGLE:
@@ -688,14 +713,12 @@ for model in models:
                                       ,mesh_scale*0.1
                                       ,mesh_scale*0.01)
                     case Model.U:
-                        qtplot_scale=-0.1
                         uc.basis = u_mesh(uc
                                       ,mesh_scale*0.1
                                       ,mesh_scale*0.05
                                       ,mesh_scale*0.004
                                       ,mesh_scale*0.004)
                     case Model.RHS:
-                        qtplot_scale=-0.1
                         uc.basis = rhs_mesh(uc
                                       ,mesh_scale*0.15
                                       ,mesh_scale*0.15
