@@ -44,7 +44,7 @@ Dependencies can be installed using pip
  * scikit-fem - main target for this repo, requires numpy and scipy [all] also brings also matplotlib
  * gmsh - geometry and mesh definitions
  * pyvistaqt pyqt5 - requires pyvista and qtpy
- * pytest spyder-unittest - helps running scikit-fem tests with debugger
+ * pytest spyder-unittest - helps running scikit-fem tests with debugger, as noted in https://docs.spyder-ide.org/current/plugins/unittest.html this combination is not working currently
 
 Typical command needed after update of python is (uv in front if it is used)
 ```
