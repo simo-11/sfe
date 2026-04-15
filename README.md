@@ -19,9 +19,9 @@ PS C:\> winget install -e --id astral-sh.uv
 
 ## Python
 ```
-C:\> uv python install 3.14
-github\sfe [main ≡]> uv venv --clear --python 3.14
-Using CPython 3.14.3
+C:\> uv python install 3.14.4
+github\sfe [main ≡]> uv venv --clear --python 3.14.4
+Using CPython 3.14.4
 Creating virtual environment at: .venv
 Activate with: .venv\Scripts\activate
 github\sfe [main ≡]> .venv\Scripts\activate
@@ -48,7 +48,7 @@ Dependencies can be installed using pip
 
 Typical command needed after update of python is (uv in front if it is used)
 ```
-uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh pytest spyder-unittest
+uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh
 ```
 
 ## Using sfe
