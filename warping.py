@@ -88,6 +88,42 @@ def list_entities():
 
         print(f"{dim:<4} {tag:<6} {etype:<20} {extra}")
 
+def sf_to_pyvista(uc,m: sf.mesh.Mesh, z:np.ndarray):
+    """
+    Convert sf.mesh.Mesh to a PyVista UnstructuredGrid
+    """
+    if m is None:
+        m=uc.basis.mesh
+    # Create 3D points: Combine 2D mesh points (m.p) with Z array
+    points_3d = np.column_stack((m.p.T, z))
+    cells_sf = uc.basis.element_dofs.T
+    n_elements, nodes_per_elem = cells_sf.shape
+# 3. VTK Type and Node Reordering
+    # Reorders skfem mid-nodes to VTK standard sequence
+    configs = {
+        3:  (5,  [0, 1, 2]),               # Tri P1
+        6:  (22, [0, 1, 2, 5, 3, 4]),       # Tri P2
+        4:  (9,  [0, 1, 2, 3]),            # Quad Q1
+        8:  (23, [0, 1, 2, 3, 4, 5, 6, 7]), # Quad Q2
+        9:  (23, [0, 1, 2, 3, 4, 5, 6, 7, 8])
+    }
+
+    vtk_type, reorder = configs.get(nodes_per_elem,
+                                    (5, list(range(nodes_per_elem))))
+    cells_reordered = cells_sf[:, reorder]
+
+    # 4. Construct PyVista Grid
+    padding = np.full((n_elements, 1), nodes_per_elem, dtype=cells_sf.dtype)
+    cells_pv = np.hstack((padding, cells_reordered)).ravel()
+    cell_types = np.full(n_elements, vtk_type, dtype=np.uint8)
+
+    grid = pv.UnstructuredGrid(cells_pv, cell_types, points_3d)
+
+    # 5. Scalar Data Mapping
+    # Attach Z-values as point data for color mapping
+    grid.point_data["warping"] = z
+
+    return grid
 
 def gmsh_to_pyvista():
     """
@@ -476,9 +512,11 @@ def mplot(mesh: sf.mesh.Mesh, **fields):
     plotter.show()
     return pv_mesh
 
-def qtplot(uc, m: sf.mesh.Mesh,z:np.ndarray | None=None,
+def qtplot(uc,m: sf.mesh.Mesh| None=None, z:np.ndarray | None=None,
            scale=None, **kwargs):
     just_mesh=False
+    if m is None:
+        m=uc.basis.mesh
     p_title='warping'
     if z is None or np.isnan(z).any():
         sz=np.zeros_like(m.p[0])
@@ -497,30 +535,16 @@ def qtplot(uc, m: sf.mesh.Mesh,z:np.ndarray | None=None,
                 scaler=-scale
             target_disp = scaler * max_dim
             scale = target_disp / max_disp if max_disp > 0 else 1.0
-        # Create a diverging colormap centered at zero
-        cmap = plt.get_cmap("coolwarm")  # or "seismic", "RdBu", "PiYG", etc.
-        vmin=z.min()
-        vmax=z.max()
-        if vmin<0 and vmax>0:
-            # Normalize so that zero is white
-            norm = plt_colors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
-        else:
-            norm = plt_colors.Normalize(vmin=vmin, vmax=vmax)
-        colors = cmap(norm(z))[:, :3]  # Drop alpha channel
         sz=scale*z
-    triangles=m.t.T
-    x=m.p[0]
-    y=m.p[1]
-    points = np.column_stack([x, y, sz])
-    faces = np.hstack(
-        [np.c_[np.full(len(triangles), 3), triangles]]).astype(np.int32)
-    mesh = pv.PolyData(points,faces)
+    mesh=sf_to_pyvista(uc,m,sz)
     try:
         uc.mp.clear()
     except AttributeError as e:
         logging.debug(f"First run {e}")
+    smooth_mesh = mesh.tessellate(max_n_subdivide=2)
     if just_mesh:
-        uc.mp.add_mesh(mesh,
+        points = np.column_stack((m.p.T, sz))
+        uc.mp.add_mesh(smooth_mesh,
                          show_edges=True)
         uc.mp.add_text(f"""{uc.name} {mesh.n_points} points""",
                        font_size=12)
@@ -529,10 +553,13 @@ def qtplot(uc, m: sf.mesh.Mesh,z:np.ndarray | None=None,
                    point_size=8,
                    render_points_as_spheres=True)
     else:
-        uc.mp.add_mesh(mesh,
-                         scalars=colors,rgb=True,
-                         scalar_bar_args={"title": f"{p_title} for {uc.name}"},
-                         show_edges=True)
+        limit = max(abs(sz.min()), abs(sz.max()))
+        uc.mp.add_mesh(smooth_mesh,
+                       cmap="coolwarm",
+                       clim=[-limit, limit],
+                       scalars="warping",
+                       scalar_bar_args={"title": f"{p_title} for {uc.name}"},
+                       show_edges=True)
         uc.mp.show_bounds(
             grid='back',
             location='outer',
@@ -755,7 +782,7 @@ for model in models:
                 if do_qtplot or do_tsplot:
                     (m,z)=uc.basis.refinterp(uc.S,nrefs=0)
                     if np.isnan(z).any():
-                        qtplot(uc,uc.mesh,None)
+                        qtplot(uc,None)
                         print(f'Solution failed for {uc.name}')
                         continue
                     if do_qtplot:
@@ -768,7 +795,7 @@ for model in models:
                 print(f'Exception for {uc.name}')
                 traceback.print_exc()
                 if hasattr(uc,'mp'):
-                    qtplot(uc,uc.mesh,None)
+                    qtplot(uc,None)
 # %%  Saint‑Venant
 # warping (ω): Laplace = 0
 # \nabla ^2\omega =0,\qquad \frac{\partial \omega }{\partial n}=yn_x-xn_y.
