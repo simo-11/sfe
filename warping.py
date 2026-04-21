@@ -10,6 +10,18 @@ Supported elements are linear and quadratic triangles.
 Supported sections are square, rectangle, RSH and U.
 Main target is SHS.
 
+Most routines use parameter uc which is SimpleNamespace
+containing e.g.
+model enum
+element scikit-element
+name short str based on element e.g. TriP2
+basis CellBasis
+  doflocs - coordinates of nodes for scikit-solution (2,N) in this context
+  element_dofs - element topology, int32:s refef to doflocs
+t_basis copy of basis transferred to centroid
+S solution of warping function
+sp dict of section properties - note use of scale
+
 TODO:
 
 
@@ -28,7 +40,6 @@ import logging
 import pyvista as pv
 import pyvistaqt
 import matplotlib.pyplot as plt
-import matplotlib.colors as plt_colors
 import gmsh
 import meshio
 import vtk
@@ -102,14 +113,13 @@ def sf_to_pyvista(uc,m: sf.mesh.Mesh, z:np.ndarray):
     # Reorders skfem mid-nodes to VTK standard sequence
     configs = {
         3:  (5,  [0, 1, 2]),               # Tri P1
-        6:  (22, [0, 1, 2, 5, 3, 4]),       # Tri P2
+        6:  (22, [0, 1, 2, 3, 4, 5]),      # Tri P2
         4:  (9,  [0, 1, 2, 3]),            # Quad Q1
         8:  (23, [0, 1, 2, 3, 4, 5, 6, 7]), # Quad Q2
         9:  (23, [0, 1, 2, 3, 4, 5, 6, 7, 8])
     }
 
-    vtk_type, reorder = configs.get(nodes_per_elem,
-                                    (5, list(range(nodes_per_elem))))
+    vtk_type, reorder = configs.get(nodes_per_elem)
     cells_reordered = cells_sf[:, reorder]
 
     # 4. Construct PyVista Grid
@@ -515,14 +525,13 @@ def mplot(mesh: sf.mesh.Mesh, **fields):
 def qtplot(uc,m: sf.mesh.Mesh| None=None, z:np.ndarray | None=None,
            scale=None, **kwargs):
     just_mesh=False
-    if m is None:
+    if m is None or z is None or np.isnan(z).any():
         m=uc.basis.mesh
-    p_title='warping'
-    if z is None or np.isnan(z).any():
         sz=np.zeros_like(m.p[0])
         just_mesh=True
         p_title='mesh'
     else:
+        p_title='warping'
         max_disp = max(z.max(),-z.min())
         # Apply scaled displacement to mesh
         if scale==None or scale<0:
@@ -692,7 +701,7 @@ for model in models:
             #types.SimpleNamespace(elem=sf.ElementTriN2()), # c_einsum fails
             #types.SimpleNamespace(elem=sf.ElementTriN3()), # c_einsum fails
             #types.SimpleNamespace(elem=sf.ElementTriP0()),  # Solve fails
-            types.SimpleNamespace(elem=sf.ElementTriP1()),
+            #types.SimpleNamespace(elem=sf.ElementTriP1()),
             #types.SimpleNamespace(elem=sf.ElementTriP1B()),
             #types.SimpleNamespace(elem=sf.ElementTriP1G()),
             types.SimpleNamespace(elem=sf.ElementTriP2()),
@@ -701,7 +710,7 @@ for model in models:
             #types.SimpleNamespace(elem=sf.ElementTriP3()),
             #types.SimpleNamespace(elem=sf.ElementTriP4()),
              ]
-        rows = math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2)
+        rows = max(2,math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2))
         if do_qtplot or gmsh_plot:
             start_mp(rows=rows)
         if do_tsplot:
