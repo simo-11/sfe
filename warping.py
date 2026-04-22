@@ -17,10 +17,11 @@ element scikit-element
 name short str based on element e.g. TriP2
 basis CellBasis
   doflocs - coordinates of nodes for scikit-solution (2,N) in this context
-  element_dofs - element topology, int32:s refef to doflocs
+  element_dofs - element topology, int32:s refer to doflocs
 t_basis copy of basis transferred to centroid
 S solution of warping function
 sp dict of section properties - note use of scale
+scale scaling of dimensions for calculation and plots
 
 TODO:
 
@@ -99,14 +100,13 @@ def list_entities():
 
         print(f"{dim:<4} {tag:<6} {etype:<20} {extra}")
 
-def sf_to_pyvista(uc,m: sf.mesh.Mesh, z:np.ndarray):
+def sf_to_pyvista(uc,z:np.ndarray):
     """
-    Convert sf.mesh.Mesh to a PyVista UnstructuredGrid
+    Convert sf.basis to a PyVista UnstructuredGrid
     """
-    if m is None:
-        m=uc.basis.mesh
+    coords=uc.basis.doflocs
     # Create 3D points: Combine 2D mesh points (m.p) with Z array
-    points_3d = np.column_stack((m.p.T, z))
+    points_3d = np.column_stack((coords.T, z))
     cells_sf = uc.basis.element_dofs.T
     n_elements, nodes_per_elem = cells_sf.shape
 # 3. VTK Type and Node Reordering
@@ -114,6 +114,7 @@ def sf_to_pyvista(uc,m: sf.mesh.Mesh, z:np.ndarray):
     configs = {
         3:  (5,  [0, 1, 2]),               # Tri P1
         6:  (22, [0, 1, 2, 3, 4, 5]),      # Tri P2
+        10: (69, list(range(10))),         # Tri P3
         4:  (9,  [0, 1, 2, 3]),            # Quad Q1
         8:  (23, [0, 1, 2, 3, 4, 5, 6, 7]), # Quad Q2
         9:  (23, [0, 1, 2, 3, 4, 5, 6, 7, 8])
@@ -464,27 +465,49 @@ def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     gmsh.model.addPhysicalGroup(2, surface_tags, 1)
     return finalize_mesh(uc)
 
-def get_basis(uc,meshio_mesh):
+def get_basis(uc, meshio_mesh):
+    """
+    Constructs a scikit-fem Basis from meshio,
+    handling P3 elements via isoparametric mapping.
+    """
     match uc.name:
         case s if s.startswith('TriP3'):
-            points = meshio_mesh.points[:, :2].T  # (2, n_nodes)
-            cells = meshio_mesh.cells_dict["triangle10"]  # (n_elements, 10)
-            uc.mesh = sf.MeshTri(points, cells[:, :3].T)
-            mapping = sf.MappingIsoparametric(uc.mesh, uc.elem, cells.T)
-            basis = sf.Basis(uc.mesh, uc.elem, mapping=mapping)
+ # Points from Gmsh (25 nodes)
+            pts = meshio_mesh.points[:, :2].T
+            # Full connectivity from Gmsh (10 columns)
+            cs = meshio_mesh.cells_dict["triangle10"]
+            dofs=sf.assembly.Dofs(cs)
+
+            # 1. Mesh defines topology (corners only)
+            uc.mesh = sf.MeshTri(pts, cs[:, :3].T)
+
+            # 2. Mapping defines the curved geometry
+            mapping = sf.MappingIsoparametric(uc.mesh, uc.elem, cs.T)
+
+            # 3. Explicitly pass the connectivity (dofs) to the Basis
+            # This forces the basis to use the 25 points from Gmsh
+            # instead of generating 33-37 new internal DOFs.
+            basis = sf.Basis(
+                uc.mesh,
+                uc.elem,
+                mapping=mapping,
+                dofs=dofs  # This is the key line
+            )
         case _:
-            uc.mesh=skio.from_meshio(meshio_mesh)
-            basis=sf.Basis(uc.mesh, uc.elem)
+            uc.mesh = skio.from_meshio(meshio_mesh)
+            basis = sf.Basis(uc.mesh, uc.elem)
+
     return basis
 
-def tsplot(uc,m: sf.mesh.Mesh,z:np.ndarray):
+def tsplot(uc):
     ax=uc.ax
     ax.set_title(uc.name)
     ax.axis("equal")
-    x=m.p[0]
-    y=m.p[1]
-    triangles=m.t.T
-    ax.plot_trisurf(x, y, z,
+    coords=uc.basis.doflocs
+    x=coords[0]
+    y=coords[1]
+    triangles=uc.basis.element_dofs
+    ax.plot_trisurf(x, y, uc.S,
                          triangles=triangles,
                          cmap='coolwarm')
     pyplot.pause(0.01)
@@ -522,21 +545,20 @@ def mplot(mesh: sf.mesh.Mesh, **fields):
     plotter.show()
     return pv_mesh
 
-def qtplot(uc,m: sf.mesh.Mesh| None=None, z:np.ndarray | None=None,
-           scale=None, **kwargs):
+def qtplot(uc,scale=None, **kwargs):
     just_mesh=False
-    if m is None or z is None or np.isnan(z).any():
-        m=uc.basis.mesh
-        sz=np.zeros_like(m.p[0])
+    coords=uc.basis.doflocs
+    if uc.S is None or np.isnan(uc.S).any():
+        sz=np.zeros(coords.shape[1])
         just_mesh=True
         p_title='mesh'
     else:
         p_title='warping'
-        max_disp = max(z.max(),-z.min())
+        max_disp = max(uc.S.max(),-uc.S.min())
         # Apply scaled displacement to mesh
         if scale==None or scale<0:
-            x_range = max(m.p[0])-min(m.p[0])
-            y_range = max(m.p[1])-min(m.p[1])
+            x_range = max(coords[0])-min(coords[0])
+            y_range = max(coords[1])-min(coords[1])
             max_dim = max(x_range, y_range)
             if scale==None:
                 scaler=0.1
@@ -544,15 +566,15 @@ def qtplot(uc,m: sf.mesh.Mesh| None=None, z:np.ndarray | None=None,
                 scaler=-scale
             target_disp = scaler * max_dim
             scale = target_disp / max_disp if max_disp > 0 else 1.0
-        sz=scale*z
-    mesh=sf_to_pyvista(uc,m,sz)
+        sz=scale*uc.S
+    mesh=sf_to_pyvista(uc,sz)
     try:
         uc.mp.clear()
     except AttributeError as e:
         logging.debug(f"First run {e}")
     smooth_mesh = mesh.tessellate(max_n_subdivide=2)
     if just_mesh:
-        points = np.column_stack((m.p.T, sz))
+        points = np.column_stack((coords.T, sz))
         uc.mp.add_mesh(smooth_mesh,
                          show_edges=True)
         uc.mp.add_text(f"""{uc.name} {mesh.n_points} points""",
@@ -704,10 +726,10 @@ for model in models:
             #types.SimpleNamespace(elem=sf.ElementTriP1()),
             #types.SimpleNamespace(elem=sf.ElementTriP1B()),
             #types.SimpleNamespace(elem=sf.ElementTriP1G()),
-            types.SimpleNamespace(elem=sf.ElementTriP2()),
+            #types.SimpleNamespace(elem=sf.ElementTriP2()),
             #types.SimpleNamespace(elem=sf.ElementTriP2B()),
             #types.SimpleNamespace(elem=sf.ElementTriP2G()),
-            #types.SimpleNamespace(elem=sf.ElementTriP3()),
+            types.SimpleNamespace(elem=sf.ElementTriP3()),
             #types.SimpleNamespace(elem=sf.ElementTriP4()),
              ]
         rows = max(2,math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2))
@@ -789,22 +811,21 @@ for model in models:
   gamma={uc.sp['gamma']/m6:.4G}
   j={uc.sp['j']/m4:.4G}''')
                 if do_qtplot or do_tsplot:
-                    (m,z)=uc.basis.refinterp(uc.S,nrefs=0)
-                    if np.isnan(z).any():
-                        qtplot(uc,None)
+                    if np.isnan(uc.S).any():
+                        qtplot(uc)
                         print(f'Solution failed for {uc.name}')
                         continue
                     if do_qtplot:
-                        qtplot(uc,m,z,scale=qtplot_scale)
+                        qtplot(uc,scale=qtplot_scale)
                     print((f'{uc.name}: max_warping ='
-                           f' {(z.max()-z.min())/2:.4G}'))
+                           f' {(uc.S.max()-uc.S.min())/2:.4G}'))
                     if do_tsplot:
-                        tsplot(uc,m,z)
+                        tsplot(uc)
             except Exception:
                 print(f'Exception for {uc.name}')
                 traceback.print_exc()
                 if hasattr(uc,'mp'):
-                    qtplot(uc,None)
+                    qtplot(uc)
 # %%  Saint‑Venant
 # warping (ω): Laplace = 0
 # \nabla ^2\omega =0,\qquad \frac{\partial \omega }{\partial n}=yn_x-xn_y.
