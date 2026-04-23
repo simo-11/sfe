@@ -488,8 +488,7 @@ def get_basis(uc, meshio_mesh):
             )
             # 4. Sync the basis DOFs with Gmsh global indices
             basis.dofs.element_dofs = cells
-            # 5. Correct doflocs to match the 25 unique points in cells
-            # This ensures basis.doflocs.shape is (2, 25)
+            # 5. Correct doflocs to match the unique points in cells
             unique_idx = np.unique(cells)
             basis.doflocs = pts[:, unique_idx]
         case _:
