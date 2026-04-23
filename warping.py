@@ -468,35 +468,33 @@ def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
 def get_basis(uc, meshio_mesh):
     """
     Constructs a scikit-fem Basis from meshio,
-    handling P3 elements via isoparametric mapping.
+    handling high order elements via isoparametric mapping.
     """
     match uc.name:
         case s if s.startswith('TriP3'):
  # Points from Gmsh (25 nodes)
             pts = meshio_mesh.points[:, :2].T
             # Full connectivity from Gmsh (10 columns)
-            cs = meshio_mesh.cells_dict["triangle10"]
-            dofs=sf.assembly.Dofs(cs)
-
+            cells = meshio_mesh.cells_dict["triangle10"]
             # 1. Mesh defines topology (corners only)
-            uc.mesh = sf.MeshTri(pts, cs[:, :3].T)
-
-            # 2. Mapping defines the curved geometry
-            mapping = sf.MappingIsoparametric(uc.mesh, uc.elem, cs.T)
-
-            # 3. Explicitly pass the connectivity (dofs) to the Basis
-            # This forces the basis to use the 25 points from Gmsh
-            # instead of generating 33-37 new internal DOFs.
+            uc.mesh = sf.MeshTri(pts, cells[:, :3].T)
+            # 2. Wrap the connectivity into a Dofs object
+            # This tells scikit-fem exactly how DOFs map to global IDs
+            mapping = sf.MappingIsoparametric(uc.mesh, uc.elem, cells.T)
             basis = sf.Basis(
                 uc.mesh,
                 uc.elem,
-                mapping=mapping,
-                dofs=dofs  # This is the key line
+                mapping=mapping
             )
+            # 4. Sync the basis DOFs with Gmsh global indices
+            basis.dofs.element_dofs = cells
+            # 5. Correct doflocs to match the 25 unique points in cells
+            # This ensures basis.doflocs.shape is (2, 25)
+            unique_idx = np.unique(cells)
+            basis.doflocs = pts[:, unique_idx]
         case _:
             uc.mesh = skio.from_meshio(meshio_mesh)
             basis = sf.Basis(uc.mesh, uc.elem)
-
     return basis
 
 def tsplot(uc):
