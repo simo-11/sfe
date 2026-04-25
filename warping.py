@@ -13,7 +13,7 @@ Main target is SHS.
 Most routines use parameter uc which is SimpleNamespace
 containing e.g.
 model enum
-element scikit-element
+elem scikit-element
 name short str based on element e.g. TriP2
 basis CellBasis
   doflocs - coordinates of nodes for scikit-solution (2,N) in this context
@@ -265,21 +265,21 @@ def gmsh_to_meshio():
     )
 
 def finalize_mesh(uc):
-    # 5. Mesh Configuration
-    if uc.quad:
+    # Mesh Configuration
+    if "Quad" in uc.name :
         gmsh.option.setNumber("Mesh.RecombineAll", 1)
         gmsh.option.setNumber("Mesh.Algorithm", 8)
-    gmsh.option.setNumber("Mesh.ElementOrder", uc.order)
+    gmsh.option.setNumber("Mesh.ElementOrder", uc.elem.maxdeg)
     gmsh.model.mesh.generate(2)
     if do_list_entities:
         list_entities()
     meshio_mesh = gmsh_to_meshio()
      # --- Optional PyVista plot ---
     if gmsh_plot:
-        amp=mp[0,min(uc.order-1,1)]
+        amp=mp[0,min(uc.elem.maxdeg-1,1)]
         amp.clear()
         amp.add_text(('gmsh mesh for '
-                      f'{uc.model} using {uc.name}, order={uc.order}')
+                      f'{uc.model} using {uc.name}')
                       ,font_size=12)
         pv_mesh = gmsh_to_pyvista()
         smooth_mesh = pv_mesh.tessellate(max_n_subdivide=2)
@@ -300,7 +300,7 @@ def rect_mesh(uc, h=0.1, b=0.1):
     """
     Generates an rectangle
     """
-    ms=np.sqrt(0.003*uc.order)*(max(h,b)+3*min(h,b))/4
+    ms=np.sqrt(0.003*uc.elem.refdom.p)*(max(h,b)+3*min(h,b))/4
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 3)
     gmsh.option.setNumber("Mesh.MeshSizeMin", ms)
@@ -315,7 +315,7 @@ def ellipse_mesh(uc, rx=0.1, ry=0.1):
     """
     Generates an ellipse.
     """
-    ms=np.sqrt(0.003*uc.order)*(max(rx,ry)+3*min(rx,ry))/2
+    ms=np.sqrt(0.003*uc.elem.refdom.p)*(max(rx,ry)+3*min(rx,ry))/2
     ms=2*rx
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 3)
@@ -477,12 +477,12 @@ def get_basis(uc, meshio_mesh):
             # Full connectivity from Gmsh (10 columns)
             cells = meshio_mesh.cells_dict["triangle10"]
             # 1. Mesh defines topology (corners only)
-            uc.mesh = sf.MeshTri(pts, cells[:, :3].T)
+            mesh = sf.MeshTri(pts, cells[:, :3].T)
             # 2. Wrap the connectivity into a Dofs object
             # This tells scikit-fem exactly how DOFs map to global IDs
-            mapping = sf.MappingIsoparametric(uc.mesh, uc.elem, cells.T)
+            mapping = sf.MappingIsoparametric(mesh, uc.elem, cells.T)
             basis = sf.Basis(
-                uc.mesh,
+                mesh,
                 uc.elem,
                 mapping=mapping
             )
@@ -492,8 +492,8 @@ def get_basis(uc, meshio_mesh):
             unique_idx = np.unique(cells)
             basis.doflocs = pts[:, unique_idx]
         case _:
-            uc.mesh = skio.from_meshio(meshio_mesh)
-            basis = sf.Basis(uc.mesh, uc.elem)
+            mesh = skio.from_meshio(meshio_mesh)
+            basis = sf.Basis(mesh, uc.elem)
     return basis
 
 def tsplot(uc):
@@ -543,6 +543,7 @@ def mplot(mesh: sf.mesh.Mesh, **fields):
     return pv_mesh
 
 def qtplot(uc,scale=None, **kwargs):
+    fill_name(uc)
     just_mesh=False
     coords=uc.basis.doflocs
     if uc.S is None or np.isnan(uc.S).any():
@@ -656,8 +657,8 @@ def sp(uc):
     ixy=i_xy.assemble(uc.basis)
     sp["c"]=[cx,cy]
     sp["ic"]=[ixx,iyy,ixy]
-    p = uc.mesh.p.copy()
-    t = uc.mesh.t.copy()
+    p = uc.basis.mesh.p.copy()
+    t = uc.basis.mesh.t.copy()
     p = p + np.array([[-cx], [-cy]])
     uc.t_mesh=sf.MeshTri(p,t)
     solve(uc)
@@ -686,47 +687,53 @@ def sp(uc):
     sp["sc"]=[cx+scx,cy+scy]
     uc.sp=sp
 
+def report_sp(uc,scale=1):
+    if not hasattr(uc,'sp'):
+        return
+    m4=scale**4
+    m6=scale**6
+    print(f'''Section properties using {uc.name}
+  area={uc.sp['area']/(scale**2):.4G}
+  c=[{uc.sp['c'][0]/scale:.4G},{uc.sp['c'][1]/scale:.4G}]
+  ic=[{uc.sp['ic'][0]/m4:.4G}, \
+  {uc.sp['ic'][1]/m4:.4G}, \
+  {uc.sp['ic'][2]/m4:.4G}]
+  sc=[{uc.sp['sc'][0]/scale:.4G},{uc.sp['sc'][1]/scale:.4G}]
+  gamma={uc.sp['gamma']/m6:.4G}
+  j={uc.sp['j']/m4:.4G}''')
+
 class Model(enum.Enum):
     SQUARE=1
     RECTANGLE=2
     U=3
     RHS=4
     CIRCLE=5
-models=list(Model)
-models=(Model.CIRCLE,)
-do_tsplot=False
-do_qtplot=True
-do_sp=True
-do_list_entities=False
-gmsh_plot=True
-if gmsh_plot:
-    gmsh_slot=1
-else:
-    gmsh_slot=0
-mesh_scale=1000
-if not do_tsplot:
-    plt.close('all')
-if not do_qtplot and not gmsh_plot:
-    if "mp" in globals():
-        mp=globals()["mp"]
-        mp.close()
-        del(mp)
-r=gmsh_slot
-c=0
-for model in models:
-    for nc in (10,):
+
+def fill_name(uc):
+    if not hasattr(uc,'name'):
+        uc.name=type(uc.elem).__name__.split('Element')[-1]
+
+def test_elements():
+    mp_global = globals().get("mp")
+    models=list(Model)
+    models=(Model.CIRCLE,)
+    if gmsh_plot:
+        gmsh_slot=1
+    else:
+        gmsh_slot=0
+    mesh_scale=1000
+    if not do_tsplot:
+        plt.close('all')
+    if not do_qtplot and not gmsh_plot:
+        if mp_global is not None:
+            mp_global.close()
+            mp_global=None
+    r=gmsh_slot
+    c=0
+    for model in models:
         ucs=[
-            #types.SimpleNamespace(elem=sf.ElementTriN1()), # c_einsum fails
-            #types.SimpleNamespace(elem=sf.ElementTriN2()), # c_einsum fails
-            #types.SimpleNamespace(elem=sf.ElementTriN3()), # c_einsum fails
-            #types.SimpleNamespace(elem=sf.ElementTriP0()),  # Solve fails
-            #types.SimpleNamespace(elem=sf.ElementTriP1()),
-            #types.SimpleNamespace(elem=sf.ElementTriP1B()),
-            #types.SimpleNamespace(elem=sf.ElementTriP1G()),
-            #types.SimpleNamespace(elem=sf.ElementTriP2()),
-            #types.SimpleNamespace(elem=sf.ElementTriP2B()),
-            #types.SimpleNamespace(elem=sf.ElementTriP2G()),
-            types.SimpleNamespace(elem=sf.ElementTriP3()),
+            types.SimpleNamespace(elem=sf.ElementTriP2()),
+            #types.SimpleNamespace(elem=sf.ElementTriP3()),
             #types.SimpleNamespace(elem=sf.ElementTriP4()),
              ]
         rows = max(2,math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2))
@@ -738,20 +745,7 @@ for model in models:
         for uc in ucs:
             uc.model=model
             try:
-                uc.name=type(uc.elem).__name__.split('Element')[-1]
-                uc.quad=False
-                uc.serendipity=False
-                qtplot_scale=-0.1
-                match uc.name:
-                    case s if s.startswith('TriP3'):
-                        uc.order=3
-                    case s if s.startswith('TriP2'):
-                        uc.order=2
-                    case s if s.startswith('TriP1'):
-                        uc.order=1
-                    case _:
-                        raise ValueError(f"Element {uc.name} is"
-                                         "not supported")
+                fill_name(uc)
                 match model:
                     case Model.SQUARE:
                         qtplot_scale=-0.3
@@ -781,13 +775,13 @@ for model in models:
                                       ,mesh_scale*0.008)
                     case _:
                         raise ValueError(f"model {model} is not supported")
-                print(f'Model={uc.model}, nvertices={uc.mesh.nvertices}')
-                uc.scale=mesh_scale
+                print(f'Model={uc.model}, nvertices={uc.basis.mesh.nvertices}')
                 if do_tsplot:
                     uc.ax=fig.add_subplot(rows,
                                           2, r * 2 + c + 1,
                                           projection="3d")
-                uc.mp=mp[r,c]
+                if mp_global is not None:
+                    uc.mp=mp_global[r,c]
                 if c==1:
                     c=0
                     r=r+1
@@ -796,18 +790,7 @@ for model in models:
                 if do_sp or do_qtplot or do_tsplot:
                     sp(uc)
                     if do_sp:
-                        m4=mesh_scale**4
-                        m6=mesh_scale**6
-                        print(f'''Section properties using {uc.name}
-  area={uc.sp['area']/(mesh_scale**2):.4G}
-  c=[{uc.sp['c'][0]/mesh_scale:.4G},{uc.sp['c'][1]/mesh_scale:.4G}]
-  ic=[{uc.sp['ic'][0]/m4:.4G}, \
-{uc.sp['ic'][1]/m4:.4G}, \
-{uc.sp['ic'][2]/m4:.4G}]
-  sc=[{uc.sp['sc'][0]/mesh_scale:.4G},{uc.sp['sc'][1]/mesh_scale:.4G}]
-  gamma={uc.sp['gamma']/m6:.4G}
-  j={uc.sp['j']/m4:.4G}''')
-                if do_qtplot or do_tsplot:
+                        report_sp(uc,scale=mesh_scale)
                     if np.isnan(uc.S).any():
                         qtplot(uc)
                         print(f'Solution failed for {uc.name}')
@@ -823,6 +806,29 @@ for model in models:
                 traceback.print_exc()
                 if hasattr(uc,'mp'):
                     qtplot(uc)
+
+
+def runs():
+    test_elements()
+
+do_tsplot=False
+do_qtplot=True
+do_sp=True
+do_list_entities=False
+gmsh_plot=True
+#%% test circles
+def test_circle():
+    uc=types.SimpleNamespace(elem=sf.ElementTriP3())
+    uc.basis = sf.Basis(sf.MeshTri2.init_circle(0,smoothed=True),
+                        uc.elem)
+    uc.S=None
+    mp_global = globals().get("mp")
+    uc.mp=mp_global[0,0]
+    sp(uc)
+    qtplot(uc)
+    report_sp(uc)
+    return uc
+cc=test_circle()
 # %%  Saint‑Venant
 # warping (ω): Laplace = 0
 # \nabla ^2\omega =0,\qquad \frac{\partial \omega }{\partial n}=yn_x-xn_y.
