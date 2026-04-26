@@ -566,6 +566,9 @@ def qtplot(uc,scale=None, **kwargs):
             scale = target_disp / max_disp if max_disp > 0 else 1.0
         sz=scale*uc.S
     mesh=sf_to_pyvista(uc,sz)
+    if getattr(uc,'cell_ids',np.zeros(0,dtype=int)).shape[0]>0:
+        mesh=mesh.extract_cells(uc.cell_ids)
+        mesh=mesh.remove_unused_points()
     try:
         uc.mp.clear()
     except AttributeError as e:
@@ -605,6 +608,29 @@ def qtplot(uc,scale=None, **kwargs):
         uc.mp.add_text(f"""{uc.name} {mesh.n_points} points
 scale={scale:.4G}, max warping={max_disp:.4G}
 """, font_size=12)
+    if getattr(uc,'show_cell_ids',False):
+        centers = mesh.cell_centers().points
+        labels = np.arange(mesh.n_cells).astype(str)
+        uc.mp.add_point_labels(
+            centers,
+            labels,
+            point_size=20,
+            font_size=12,
+            text_color="yellow",
+            shape=None
+            )
+    def pick_cell_callback(picked):
+        cell_ids=getattr(uc,'cell_ids',np.zeros(0,dtype=int))
+        uc.cell_ids=np.append(cell_ids,picked)
+        qtplot(uc)
+    if getattr(uc,'pick_cells',False):
+        uc.mp.disable_picking()
+        uc.mp.enable_cell_picking(
+            callback=pick_cell_callback,
+            through=False,        # pick only front-most cell
+            show_message=False,   # Press R to toggle selection tool
+            style='wireframe'     # highlight picked cell
+            )
     uc.mp.render()
     return (scale)
 
@@ -849,6 +875,8 @@ def test_circle():
     mp_global = globals().get("mp")
     for row,uc in enumerate(ucs):
         uc.vtk_tessellate=0
+        uc.pick_cells=True
+        uc.show_cell_ids=True
         uc.basis = sf.Basis(sf.MeshTri2.init_circle(0,smoothed=True),
                         uc.elem)
         uc.mp=mp_global[row,0]
