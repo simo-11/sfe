@@ -543,10 +543,10 @@ def mplot(mesh: sf.mesh.Mesh, **fields):
     return pv_mesh
 
 def qtplot(uc,scale=None, **kwargs):
-    fill_name(uc)
+    fill_uc_defaults(uc)
     just_mesh=False
     coords=uc.basis.doflocs
-    if uc.S is None or np.isnan(uc.S).any():
+    if not hasattr(uc,'S') or uc.S is None or np.isnan(uc.S).any():
         sz=np.zeros(coords.shape[1])
         just_mesh=True
         p_title='mesh'
@@ -570,11 +570,15 @@ def qtplot(uc,scale=None, **kwargs):
         uc.mp.clear()
     except AttributeError as e:
         logging.debug(f"First run {e}")
-    smooth_mesh = mesh.tessellate(max_n_subdivide=2)
+    if uc.vtk_tessellate>0:
+        smooth_mesh = mesh.tessellate(max_n_subdivide=uc.vtk_tessellate)
+    else:
+        smooth_mesh=mesh
     if just_mesh:
         points = np.column_stack((coords.T, sz))
         uc.mp.add_mesh(smooth_mesh,
-                         show_edges=True)
+                       scalars=None,
+                       show_edges=True)
         uc.mp.add_text(f"""{uc.name} {mesh.n_points} points""",
                        font_size=12)
         uc.mp.add_points(points,
@@ -593,8 +597,8 @@ def qtplot(uc,scale=None, **kwargs):
             grid='back',
             location='outer',
             ticks='both',
-            xtitle='X[mm]',
-            ytitle='Y[mm]',
+            xtitle=f'X[{uc.units}]',
+            ytitle=f'Y[{uc.units}]',
             fmt="%.0f",
             ztitle=p_title
         )
@@ -687,9 +691,11 @@ def sp(uc):
     sp["sc"]=[cx+scx,cy+scy]
     uc.sp=sp
 
-def report_sp(uc,scale=1):
+def report_sp(uc):
     if not hasattr(uc,'sp'):
         return
+    fill_uc_defaults(uc)
+    scale=uc.mesh_scale
     m4=scale**4
     m6=scale**6
     print(f'''Section properties using {uc.name}
@@ -709,9 +715,27 @@ class Model(enum.Enum):
     RHS=4
     CIRCLE=5
 
-def fill_name(uc):
+def fill_uc_defaults(uc):
     if not hasattr(uc,'name'):
         uc.name=type(uc.elem).__name__.split('Element')[-1]
+    if not hasattr(uc,'S'):
+        uc.S=None
+    if not hasattr(uc,'mesh_scale'):
+        uc.mesh_scale=1
+    if not hasattr(uc,'vtk_tessellate'):
+        uc.vtk_tessellate==2
+    if not hasattr(uc,'units'):
+        match uc.mesh_scale:
+            case 1:
+                uc.units='m'
+            case 10:
+                uc.units='dm'
+            case 100:
+                uc.units='cm'
+            case 1000:
+                uc.units='mm'
+            case _:
+                uc.units='?'
 
 def test_elements():
     mp_global = globals().get("mp")
@@ -744,8 +768,8 @@ def test_elements():
             pyplot.tight_layout()
         for uc in ucs:
             uc.model=model
+            uc.mesh_scale=mesh_scale
             try:
-                fill_name(uc)
                 match model:
                     case Model.SQUARE:
                         qtplot_scale=-0.3
@@ -818,17 +842,23 @@ do_list_entities=False
 gmsh_plot=True
 #%% test circles
 def test_circle():
-    uc=types.SimpleNamespace(elem=sf.ElementTriP3())
-    uc.basis = sf.Basis(sf.MeshTri2.init_circle(0,smoothed=True),
-                        uc.elem)
-    uc.S=None
+    ucs=[types.SimpleNamespace(elem=sf.ElementTriP2()),
+         types.SimpleNamespace(elem=sf.ElementTriP3())
+         ]
+    start_mp(rows=len(ucs))
     mp_global = globals().get("mp")
-    uc.mp=mp_global[0,0]
-    sp(uc)
-    qtplot(uc)
-    report_sp(uc)
-    return uc
-cc=test_circle()
+    for row,uc in enumerate(ucs):
+        uc.vtk_tessellate=0
+        uc.basis = sf.Basis(sf.MeshTri2.init_circle(0,smoothed=True),
+                        uc.elem)
+        uc.mp=mp_global[row,0]
+        qtplot(uc)
+        sp(uc)
+        uc.mp=mp_global[row,1]
+        qtplot(uc)
+        report_sp(uc)
+    return ucs
+ccs=test_circle()
 # %%  Saint‑Venant
 # warping (ω): Laplace = 0
 # \nabla ^2\omega =0,\qquad \frac{\partial \omega }{\partial n}=yn_x-xn_y.
