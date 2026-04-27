@@ -114,7 +114,7 @@ def sf_to_pyvista(uc,z:np.ndarray):
     configs = {
         3:  (5,  [0, 1, 2]),               # Tri P1
         6:  (22, [0, 1, 2, 3, 4, 5]),      # Tri P2
-        10: (69, list(range(10))),         # Tri P3
+        10: (69, list(range(7)) +[8, 7, 9]),# Tri P3
         4:  (9,  [0, 1, 2, 3]),            # Quad Q1
         8:  (23, [0, 1, 2, 3, 4, 5, 6, 7]), # Quad Q2
         9:  (23, [0, 1, 2, 3, 4, 5, 6, 7, 8])
@@ -621,7 +621,7 @@ scale={scale:.4G}, max warping={max_disp:.4G}
             )
     def pick_cell_callback(picked):
         cell_ids=getattr(uc,'cell_ids',np.zeros(0,dtype=int))
-        uc.cell_ids=np.append(cell_ids,picked)
+        uc.cell_ids=np.append(cell_ids,picked.cell_id)
         qtplot(uc)
     if getattr(uc,'pick_cells',False):
         uc.mp.disable_picking()
@@ -866,7 +866,9 @@ do_qtplot=True
 do_sp=True
 do_list_entities=False
 gmsh_plot=True
-#%% test circles
+#%% test circle
+# qtplot(ccs[0])
+# qtplot(ccs[1])
 def test_circle():
     ucs=[types.SimpleNamespace(elem=sf.ElementTriP2()),
          types.SimpleNamespace(elem=sf.ElementTriP3())
