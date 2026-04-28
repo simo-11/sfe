@@ -266,7 +266,7 @@ def gmsh_to_meshio():
 
 def finalize_mesh(uc):
     # Mesh Configuration
-    if "Quad" in uc.name :
+    if isinstance(uc.elem.refdom,sf.refdom.RefQuad):
         gmsh.option.setNumber("Mesh.RecombineAll", 1)
         gmsh.option.setNumber("Mesh.Algorithm", 8)
     gmsh.option.setNumber("Mesh.ElementOrder", uc.elem.maxdeg)
@@ -315,8 +315,8 @@ def ellipse_mesh(uc, rx=0.1, ry=0.1):
     """
     Generates an ellipse.
     """
-    ms=np.sqrt(0.003*uc.elem.refdom.p)*(max(rx,ry)+3*min(rx,ry))/2
-    ms=2*rx
+    ms=np.sqrt(0.03*uc.elem.maxdeg)*(max(rx,ry)+3*min(rx,ry))/2
+    #ms=2*rx # for testing with very coarce mesh
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 3)
     gmsh.option.setNumber("Mesh.MeshSizeMin", ms)
@@ -509,14 +509,16 @@ def tsplot(uc):
                          cmap='coolwarm')
     pyplot.pause(0.01)
 
-def start_mp(rows=1):
+def start_mp(nrows=1, ncols=2,**kwargs):
     global mp
+    params = dict(nrows=nrows, ncols=ncols)
+    params.update(kwargs)
     if not "mp" in globals():
-        mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=2)
-    if mp._nrows != rows:
+        mp = pyvistaqt.MultiPlotter(**params)
+    if mp._nrows != nrows or mp._ncols != ncols:
         mp.close()
-        mp = pyvistaqt.MultiPlotter(nrows=rows, ncols=2)
-    return mp[0,0]
+        mp = pyvistaqt.MultiPlotter(**params)
+    return mp
 
 def mplot(mesh: sf.mesh.Mesh, **fields):
     """
@@ -537,7 +539,7 @@ def mplot(mesh: sf.mesh.Mesh, **fields):
     )
     for name, arr in fields.items():
         pv_mesh.point_data[name] = arr
-    plotter = start_mp()
+    plotter = start_mp()[0,0]
     plotter.add_mesh(pv_mesh, scalars=list(fields.keys())[0])
     plotter.show()
     return pv_mesh
@@ -690,7 +692,7 @@ def sp(uc):
     p = uc.basis.mesh.p.copy()
     t = uc.basis.mesh.t.copy()
     p = p + np.array([[-cx], [-cy]])
-    uc.t_mesh=sf.MeshTri(p,t)
+    uc.t_mesh=sf.MeshTri2(p,t)
     solve(uc)
     @sf.Functional
     def i_xw(w):
@@ -743,13 +745,17 @@ class Model(enum.Enum):
 
 def fill_uc_defaults(uc):
     if not hasattr(uc,'name'):
-        uc.name=type(uc.elem).__name__.split('Element')[-1]
+        if hasattr(uc,'basis'):
+            uc.name=(f'{type(uc.basis.mesh).__name__}, '
+                f'{type(uc.basis.elem).__name__}')
+        else:
+            uc.name=type(uc.elem).__name__.split('Element')[-1]
     if not hasattr(uc,'S'):
         uc.S=None
     if not hasattr(uc,'mesh_scale'):
         uc.mesh_scale=1
     if not hasattr(uc,'vtk_tessellate'):
-        uc.vtk_tessellate==2
+        uc.vtk_tessellate=2
     if not hasattr(uc,'units'):
         match uc.mesh_scale:
             case 1:
@@ -788,13 +794,14 @@ def test_elements():
              ]
         rows = max(2,math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2))
         if do_qtplot or gmsh_plot:
-            start_mp(rows=rows)
+            start_mp(nrows=rows)
         if do_tsplot:
             fig = pyplot.figure(num='warping using skfem',clear=True)
             pyplot.tight_layout()
         for uc in ucs:
             uc.model=model
             uc.mesh_scale=mesh_scale
+            fill_uc_defaults(uc)
             try:
                 match model:
                     case Model.SQUARE:
@@ -840,7 +847,7 @@ def test_elements():
                 if do_sp or do_qtplot or do_tsplot:
                     sp(uc)
                     if do_sp:
-                        report_sp(uc,scale=mesh_scale)
+                        report_sp(uc)
                     if np.isnan(uc.S).any():
                         qtplot(uc)
                         print(f'Solution failed for {uc.name}')
@@ -852,20 +859,21 @@ def test_elements():
                     if do_tsplot:
                         tsplot(uc)
             except Exception:
-                print(f'Exception for {uc.name}')
+                print(f'Exception for {uc}')
                 traceback.print_exc()
                 if hasattr(uc,'mp'):
                     qtplot(uc)
 
 
-def runs():
-    test_elements()
 
 do_tsplot=False
 do_qtplot=True
 do_sp=True
 do_list_entities=False
 gmsh_plot=True
+"""
+test_elements()
+"""
 #%% test circle
 # qtplot(ccs[0])
 # qtplot(ccs[1])
@@ -873,13 +881,13 @@ def test_circle():
     ucs=[types.SimpleNamespace(elem=sf.ElementTriP2()),
          types.SimpleNamespace(elem=sf.ElementTriP3())
          ]
-    start_mp(rows=len(ucs))
+    start_mp(nrows=len(ucs))
     mp_global = globals().get("mp")
     for row,uc in enumerate(ucs):
         uc.vtk_tessellate=0
         uc.pick_cells=True
         uc.show_cell_ids=True
-        uc.basis = sf.Basis(sf.MeshTri2.init_circle(0,smoothed=True),
+        uc.basis = sf.Basis(sf.MeshTri2.init_circle(1),
                         uc.elem)
         uc.mp=mp_global[row,0]
         qtplot(uc)
@@ -888,7 +896,72 @@ def test_circle():
         qtplot(uc)
         report_sp(uc)
     return ucs
+"""
 ccs=test_circle()
+"""
+#%% circle_area
+def circle_area(r=1.0, ntri=32):
+   """Approximate circle area using ntri straight-edged triangles."""
+   area = 0.0
+   dtheta = 2 * np.pi / ntri
+   for i in range(ntri):
+        th0 = i * dtheta
+        th1 = (i + 1) * dtheta
+        # Corner nodes on the circle
+        p0 = np.array([r * np.cos(th0), r * np.sin(th0)])
+        p1 = np.array([r * np.cos(th1), r * np.sin(th1)])
+        # 2D cross product magnitude = |x0*y1 - x1*y0|
+        cross2d = p0[0] * p1[1] - p0[1] * p1[0]
+        area += 0.5 * abs(cross2d)
+   return area
+def run_circle_areas():
+    r=1.0
+    exact=np.pi*r ** 2
+    for n in [4, 8, 16, 32, 64, 128]:
+        approx = circle_area(r, n)
+        print(f"{n:3d} {approx:10.5g} {100*(approx - exact)/exact:8.3g} %")
+"""
+run_circle_areas()
+"""
+#%% various elements, meshes and mesh refinements for circle
+"""
+Note that element type does not have affect on calculation of area
+"""
+@sf.Functional
+def i_area(w):
+    return 1
+def test_circle_areas():
+    ucs=[
+        types.SimpleNamespace(elem=sf.ElementTriP1()),
+        types.SimpleNamespace(elem=sf.ElementTriP2()),
+        types.SimpleNamespace(elem=sf.ElementTriP3()),
+         ]
+    start_mp(nrows=len(ucs),ncols=2)
+    mp_global = globals().get("mp")
+    exact=np.pi
+    print(f"Exact: {exact:.6g}")
+    for row,uc in enumerate(ucs):
+        uc.vtk_tessellate=1
+        for col in range(2):
+            for nrefs in range(2):
+                match col:
+                    case 0:
+                        mesh=sf.MeshTri1.init_circle(nrefs)
+                    case 1:
+                        mesh=sf.MeshTri2.init_circle(nrefs)
+                uc.basis = sf.Basis(mesh,uc.elem)
+                area=i_area.assemble(uc.basis)
+                uc.mp=mp_global[row,col]
+                if hasattr(uc,'name'):
+                    del uc.name
+                qtplot(uc)
+                epc=100*(exact-area)/exact
+                print((f"{uc.name}, nrefs={nrefs}:area={area:7.6g},"
+                       f" error={epc:5.4g} %"))
+    return ucs
+"""
+qcs=test_circle_areas()
+"""
 # %%  Saint‑Venant
 # warping (ω): Laplace = 0
 # \nabla ^2\omega =0,\qquad \frac{\partial \omega }{\partial n}=yn_x-xn_y.
