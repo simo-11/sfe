@@ -119,8 +119,10 @@ def sf_to_pyvista(uc,z:np.ndarray):
         8:  (23, [0, 1, 2, 3, 4, 5, 6, 7]), # Quad Q2
         9:  (23, [0, 1, 2, 3, 4, 5, 6, 7, 8])
     }
-
-    vtk_type, reorder = configs.get(nodes_per_elem)
+    config=configs.get(nodes_per_elem)
+    if config==None:
+        raise ValueError(f"{nodes_per_elem} nodes_per_elem is not supported")
+    vtk_type, reorder = config
     cells_reordered = cells_sf[:, reorder]
 
     # 4. Construct PyVista Grid
@@ -316,7 +318,7 @@ def ellipse_mesh(uc, rx=0.1, ry=0.1):
     Generates an ellipse.
     """
     ms=np.sqrt(0.03*uc.elem.maxdeg)*(max(rx,ry)+3*min(rx,ry))/2
-    #ms=2*rx # for testing with very coarce mesh
+    ms=2*rx # for testing with very coarce mesh
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 3)
     gmsh.option.setNumber("Mesh.MeshSizeMin", ms)
@@ -473,27 +475,29 @@ def get_basis(uc, meshio_mesh):
     match uc.name:
         case s if s.startswith('TriP3'):
  # Points from Gmsh (25 nodes)
-            pts = meshio_mesh.points[:, :2].T
             # Full connectivity from Gmsh (10 columns)
             cells = meshio_mesh.cells_dict["triangle10"]
-            # 1. Mesh defines topology (corners only)
-            mesh = sf.MeshTri(pts, cells[:, :3].T)
-            # 2. Wrap the connectivity into a Dofs object
-            # This tells scikit-fem exactly how DOFs map to global IDs
-            mapping = sf.MappingIsoparametric(mesh, uc.elem, cells.T)
+            pts = meshio_mesh.points[:, :2].T
+            mesh = sf.MeshTri2(pts, cells[:,:3].T)
+            mesh.remove_unused_nodes()
             basis = sf.Basis(
                 mesh,
-                uc.elem,
-                mapping=mapping
+                uc.elem
             )
-            # 4. Sync the basis DOFs with Gmsh global indices
-            basis.dofs.element_dofs = cells
-            # 5. Correct doflocs to match the unique points in cells
+            sf_cells=cells.T
+            #sf_cells[[7,8]]=sf_cells[[8,7]]
+            basis.dofs.element_dofs = sf_cells
             unique_idx = np.unique(cells)
             basis.doflocs = pts[:, unique_idx]
         case _:
             mesh = skio.from_meshio(meshio_mesh)
             basis = sf.Basis(mesh, uc.elem)
+    n_from_elem=uc.elem.doflocs.shape[0]
+    n_from_basis=basis.dofs.element_dofs.shape[0]
+    if n_from_elem != n_from_basis:
+        raise ValueError((f"Nodecount for elements mismatch"
+                         f"n_from_elem {n_from_elem} != "
+                         f"n_from_basis {n_from_basis}"))
     return basis
 
 def tsplot(uc):
@@ -789,7 +793,7 @@ def test_elements():
     for model in models:
         ucs=[
             types.SimpleNamespace(elem=sf.ElementTriP2()),
-            #types.SimpleNamespace(elem=sf.ElementTriP3()),
+            types.SimpleNamespace(elem=sf.ElementTriP3()),
             #types.SimpleNamespace(elem=sf.ElementTriP4()),
              ]
         rows = max(2,math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2))
@@ -932,8 +936,8 @@ def i_area(w):
     return 1
 def test_circle_areas():
     ucs=[
-        types.SimpleNamespace(elem=sf.ElementTriP1()),
-        types.SimpleNamespace(elem=sf.ElementTriP2()),
+#        types.SimpleNamespace(elem=sf.ElementTriP1()),
+#        types.SimpleNamespace(elem=sf.ElementTriP2()),
         types.SimpleNamespace(elem=sf.ElementTriP3()),
          ]
     start_mp(nrows=len(ucs),ncols=2)
@@ -941,9 +945,9 @@ def test_circle_areas():
     exact=np.pi
     print(f"Exact: {exact:.6g}")
     for row,uc in enumerate(ucs):
-        uc.vtk_tessellate=1
-        for col in range(2):
-            for nrefs in range(2):
+        uc.vtk_tessellate=0
+        for col in range(1,2):
+            for nrefs in range(1):
                 match col:
                     case 0:
                         mesh=sf.MeshTri1.init_circle(nrefs)
