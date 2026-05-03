@@ -13,10 +13,11 @@ Main target is SHS.
 Most routines use parameter uc which is SimpleNamespace
 containing e.g.
 model enum
-elem scikit-element
+elem scikit-element -> basis.elem
 name short str based on element e.g. TriP2
 basis CellBasis
-  doflocs - coordinates of nodes for scikit-solution (2,N) in this context
+  N Number of DOFs
+  doflocs - coordinates of nodes for scikit-solution, (2,N) in this context
   element_dofs - element topology, int32:s refer to doflocs
 t_basis copy of basis transferred to centroid
 S solution of warping function
@@ -29,6 +30,8 @@ TODO:
 For a ready solution and tested solution
 see https://sectionproperties.readthedocs.io/
 """
+import json
+import copy
 import numpy as np
 import skfem as sf
 import skfem.io.meshio as skio
@@ -313,12 +316,13 @@ def rect_mesh(uc, h=0.1, b=0.1):
     occ.synchronize()
     return finalize_mesh(uc)
 
-def ellipse_mesh(uc, rx=0.1, ry=0.1):
+def ellipse_mesh(uc, rx=0.1, ry=0.1, ms=None):
     """
     Generates an ellipse.
     """
-    ms=np.sqrt(0.03*uc.elem.maxdeg)*(max(rx,ry)+3*min(rx,ry))/2
-    ms=2*rx # for testing with very coarce mesh
+    if ms is None:
+        ms=np.sqrt(0.03*uc.elem.maxdeg)*(max(rx,ry)+3*min(rx,ry))/2
+        ms=2*rx # for testing with very coarce mesh
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 3)
     gmsh.option.setNumber("Mesh.MeshSizeMin", ms)
@@ -466,6 +470,13 @@ def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
     surface_tags = [tag for dim, tag in all_surf]
     gmsh.model.addPhysicalGroup(2, surface_tags, 1)
     return finalize_mesh(uc)
+
+def sf_mesh_to_json(uc, mesh: sf.Mesh=None):
+    fill_uc_defaults(uc)
+    if mesh == None:
+        mesh=uc.basis.mesh
+    with open(uc.json_filename, 'w') as handle:
+        json.dump(mesh.to_dict(), handle, indent=4)
 
 def get_basis(uc, meshio_mesh):
     """
@@ -730,15 +741,15 @@ def report_sp(uc):
     scale=uc.mesh_scale
     m4=scale**4
     m6=scale**6
-    print(f'''Section properties using {uc.name}
-  area={uc.sp['area']/(scale**2):.4G}
-  c=[{uc.sp['c'][0]/scale:.4G},{uc.sp['c'][1]/scale:.4G}]
-  ic=[{uc.sp['ic'][0]/m4:.4G}, \
-  {uc.sp['ic'][1]/m4:.4G}, \
-  {uc.sp['ic'][2]/m4:.4G}]
-  sc=[{uc.sp['sc'][0]/scale:.4G},{uc.sp['sc'][1]/scale:.4G}]
-  gamma={uc.sp['gamma']/m6:.4G}
-  j={uc.sp['j']/m4:.4G}''')
+    print(f'''Section properties using {uc.name}, {uc.basis.N} DOFs
+  area={uc.sp['area']/(scale**2):.6G}
+  c=[{uc.sp['c'][0]/scale:.6G},{uc.sp['c'][1]/scale:.6G}]
+  ic=[{uc.sp['ic'][0]/m4:.6G}, \
+  {uc.sp['ic'][1]/m4:.6G}, \
+  {uc.sp['ic'][2]/m4:.6G}]
+  sc=[{uc.sp['sc'][0]/scale:.6G},{uc.sp['sc'][1]/scale:.6G}]
+  gamma={uc.sp['gamma']/m6:.6G}
+  j={uc.sp['j']/m4:.6G}''')
 
 class Model(enum.Enum):
     SQUARE=1
@@ -747,6 +758,19 @@ class Model(enum.Enum):
     RHS=4
     CIRCLE=5
 
+def deep_getattr(obj, path, suffix='-',default=''):
+    # path: "a.b.c"
+    for name in path.split('.'):
+        # dict key
+        if isinstance(obj, dict) and name in obj:
+            obj = obj[name]
+            continue
+        try:
+            obj = getattr(obj, name)
+        except AttributeError:
+            return default
+    return f"{obj}{suffix}"
+
 def fill_uc_defaults(uc):
     if not hasattr(uc,'name'):
         if hasattr(uc,'basis'):
@@ -754,6 +778,12 @@ def fill_uc_defaults(uc):
                 f'{type(uc.basis.elem).__name__}')
         else:
             uc.name=type(uc.elem).__name__.split('Element')[-1]
+    if not hasattr(uc,'json_filename'):
+        model=deep_getattr(uc,'model.name').lower()
+        mesh=deep_getattr(uc,'basis.mesh.__class__.__name__')
+        elem=deep_getattr(uc,'elem.__class__.__name__')
+        N=deep_getattr(uc,'basis.dofs.N')
+        uc.json_filename=f'gen/{model}{mesh}{elem}{N}mesh.json'
     if not hasattr(uc,'S'):
         uc.S=None
     if not hasattr(uc,'mesh_scale'):
@@ -776,7 +806,7 @@ def fill_uc_defaults(uc):
 def test_elements():
     mp_global = globals().get("mp")
     models=list(Model)
-    models=(Model.CIRCLE,)
+    models=(Model.RHS,)
     if gmsh_plot:
         gmsh_slot=1
     else:
@@ -790,21 +820,30 @@ def test_elements():
             mp_global=None
     r=gmsh_slot
     c=0
+    mesh_sizes=None
     for model in models:
         ucs=[
             types.SimpleNamespace(elem=sf.ElementTriP2()),
-            types.SimpleNamespace(elem=sf.ElementTriP3()),
+            #types.SimpleNamespace(elem=sf.ElementTriP3()),
             #types.SimpleNamespace(elem=sf.ElementTriP4()),
              ]
+        if len(ucs)==1 and model==Model.CIRCLE:
+            mesh_sizes=[1,np.sqrt(1/2),np.sqrt(1/3),0.5]
+            for _ in range(1,len(mesh_sizes)):
+                ucs.append(copy.deepcopy(ucs[0]))
         rows = max(2,math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2))
         if do_qtplot or gmsh_plot:
             start_mp(nrows=rows)
         if do_tsplot:
             fig = pyplot.figure(num='warping using skfem',clear=True)
             pyplot.tight_layout()
-        for uc in ucs:
+        for row,uc in enumerate(ucs):
             uc.model=model
             uc.mesh_scale=mesh_scale
+            if mesh_sizes==None:
+                ms=None
+            else:
+                ms=mesh_sizes[row]
             fill_uc_defaults(uc)
             try:
                 match model:
@@ -816,8 +855,9 @@ def test_elements():
                     case Model.CIRCLE:
                         qtplot_scale=-0.3
                         uc.basis = ellipse_mesh(uc
-                                      ,mesh_scale*0.1
-                                      ,mesh_scale*0.1)
+                                      ,mesh_scale*1
+                                      ,mesh_scale*1
+                                      ,ms=mesh_scale*ms)
                     case Model.RECTANGLE:
                         uc.basis = rect_mesh(uc
                                       ,mesh_scale*0.1
@@ -857,6 +897,10 @@ def test_elements():
                         print(f'Solution failed for {uc.name}')
                         continue
                     if do_qtplot:
+                        try:
+                            qtplot_scale
+                        except NameError:
+                            qtplot_scale=-0.1
                         qtplot(uc,scale=qtplot_scale)
                     print((f'{uc.name}: max_warping ='
                            f' {(uc.S.max()-uc.S.min())/2:.4G}'))
@@ -867,7 +911,7 @@ def test_elements():
                 traceback.print_exc()
                 if hasattr(uc,'mp'):
                     qtplot(uc)
-
+    return ucs
 
 
 do_tsplot=False
@@ -876,22 +920,30 @@ do_sp=True
 do_list_entities=False
 gmsh_plot=True
 """
-test_elements()
+ucs=test_elements()
 """
 #%% test circle
 # qtplot(ccs[0])
 # qtplot(ccs[1])
 def test_circle():
     ucs=[types.SimpleNamespace(elem=sf.ElementTriP2()),
-         types.SimpleNamespace(elem=sf.ElementTriP3())
+         #types.SimpleNamespace(elem=sf.ElementTriP3())
          ]
+    nref_range_stop=4
+    for nrefs in range(1,nref_range_stop):
+        ucs.append(copy.deepcopy(ucs[0]))
     start_mp(nrows=len(ucs))
     mp_global = globals().get("mp")
     for row,uc in enumerate(ucs):
         uc.vtk_tessellate=0
         uc.pick_cells=True
         uc.show_cell_ids=True
-        uc.basis = sf.Basis(sf.MeshTri2.init_circle(1),
+        # For P2
+        # 0 -> 13
+        # 1 -> 41
+        # 2 -> 145
+        # 3 -> 545
+        uc.basis = sf.Basis(sf.MeshTri2.init_circle(row),
                         uc.elem)
         uc.mp=mp_global[row,0]
         qtplot(uc)
@@ -937,7 +989,7 @@ def i_area(w):
 def test_circle_areas():
     ucs=[
 #        types.SimpleNamespace(elem=sf.ElementTriP1()),
-#        types.SimpleNamespace(elem=sf.ElementTriP2()),
+        types.SimpleNamespace(elem=sf.ElementTriP2()),
         types.SimpleNamespace(elem=sf.ElementTriP3()),
          ]
     start_mp(nrows=len(ucs),ncols=2)
@@ -954,6 +1006,7 @@ def test_circle_areas():
                     case 1:
                         mesh=sf.MeshTri2.init_circle(nrefs)
                 uc.basis = sf.Basis(mesh,uc.elem)
+                sf_mesh_to_json(uc)
                 area=i_area.assemble(uc.basis)
                 uc.mp=mp_global[row,col]
                 if hasattr(uc,'name'):
