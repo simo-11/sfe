@@ -70,6 +70,7 @@ Running file imports needed modules and defines a few functions that are describ
    * Best results are obtained using ElementTriP2 and MeshTri2 which provide good results using 2 refinements (41 dofs), area=3.13915 and gamma=1.41854E-34
    * ElementTriP2 and MeshTri2 (85 dofs) area=3.13915 and gamma=5.61194E-09. Implementing MeshTri3 could provide better results.
 * test_elements uses gmsh and meshio for CIRCLE, RECTANGLE, U and RHS. U and RHS are modelled using rounded corners.
+   * results can be compared with e.g. https://rakenteidenmekaniikka.journal.fi/article/view/163217 
 * test_circle_areas points out that the mesh defines integration limits and element type does not affect the calculation of area.
 
 
