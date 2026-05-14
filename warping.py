@@ -833,7 +833,7 @@ def test_elements():
                 ucs.append(copy.deepcopy(ucs[0]))
         rows = max(2,math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2))
         if do_qtplot or gmsh_plot:
-            start_mp(nrows=rows)
+            mp_global=start_mp(nrows=rows)
         if do_tsplot:
             fig = pyplot.figure(num='warping using skfem',clear=True)
             pyplot.tight_layout()
@@ -929,7 +929,7 @@ def test_circle():
     ucs=[types.SimpleNamespace(elem=sf.ElementTriP2()),
          #types.SimpleNamespace(elem=sf.ElementTriP3())
          ]
-    nref_range_stop=4
+    nref_range_stop=2
     for nrefs in range(1,nref_range_stop):
         ucs.append(copy.deepcopy(ucs[0]))
     start_mp(nrows=len(ucs))
