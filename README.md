@@ -67,7 +67,9 @@ PS C:\Users\simon\sfe> C:\ProgramData\spyder-6\envs\spyder-runtime\Scripts\spyde
 ## warping.py
 Running file imports needed modules and defines a few functions that are described below
  * test_circle calculates section properties for unit circle using selected elements, meshes and count of refinements. Warping constant gamma should be close to zero and area near pi.
-   * Best results are obtained using ElementTriP2 and MeshTri2 which provide good results using 2 refinements (41 dofs) 
-
+   * Best results are obtained using ElementTriP2 and MeshTri2 which provide good results using 2 refinements (41 dofs), area=3.13915 and gamma=1.41854E-34
+   * ElementTriP2 and MeshTri2 (85 dofs) area=3.13915 and gamma=5.61194E-09. Implementing MeshTri3 could provide better results.
+* test_elements uses gmsh and meshio for CIRCLE, RECTANGLE, U and RHS. U and RHS are modelled using rounded corners.
+* test_circle_areas points out that the mesh defines integration limits and element type does not affect the calculation of area.
 
 
