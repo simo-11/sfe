@@ -926,8 +926,8 @@ ucs=test_elements()
 # qtplot(ccs[0])
 # qtplot(ccs[1])
 def test_circle():
-    ucs=[types.SimpleNamespace(elem=sf.ElementTriP2()),
-         #types.SimpleNamespace(elem=sf.ElementTriP3())
+    ucs=[#types.SimpleNamespace(elem=sf.ElementTriP2()),
+         types.SimpleNamespace(elem=sf.ElementTriP3())
          ]
     nref_range_stop=2
     for nrefs in range(1,nref_range_stop):
@@ -988,7 +988,7 @@ def i_area(w):
     return 1
 def test_circle_areas():
     ucs=[
-#        types.SimpleNamespace(elem=sf.ElementTriP1()),
+        types.SimpleNamespace(elem=sf.ElementTriP1()),
         types.SimpleNamespace(elem=sf.ElementTriP2()),
         types.SimpleNamespace(elem=sf.ElementTriP3()),
          ]
@@ -998,7 +998,7 @@ def test_circle_areas():
     print(f"Exact: {exact:.6g}")
     for row,uc in enumerate(ucs):
         uc.vtk_tessellate=0
-        for col in range(1,2):
+        for col in range(0,2):
             for nrefs in range(1):
                 match col:
                     case 0:
@@ -1019,206 +1019,3 @@ def test_circle_areas():
 """
 qcs=test_circle_areas()
 """
-# %%  Saint‑Venant
-# warping (ω): Laplace = 0
-# \nabla ^2\omega =0,\qquad \frac{\partial \omega }{\partial n}=yn_x-xn_y.
-'''
-import numpy as np
-import skfem
-
-# Mesh
-m = skfem.MeshTri().init_symmetric().refined(3)
-
-# Basis
-e = skfem.ElementTriP1()
-basis = skfem.Basis(m, e)
-
-# Bilinear form: ∫ ∇u · ∇v
-@sf.BilinearForm
-def bilinf(u, v, _):
-    return skfem.helpers.dot(u.grad, v.grad)
-A = skfem.asm(bilinf, basis)
-b = np.zeros(A.shape[0])
-# Natural BC: ∂ω/∂n = y n_x − x n_y
-@sf.LinearForm
-def neumann(v, w):
-    nx, ny = w.n
-    x, y = w.x
-    return (y * nx - x * ny) * v
-b += skfem.asm(neumann, basis.boundary())
-# Solve
-omega = skfem.solve(A, b)
-@sf.Functional
-def den_integral(w):
-   return w['uh']
-den=den_integral.assemble(basis, uh=basis.interpolate(omega))
-@sf.Functional
-def ex_integral(w):
-   return w['uh']*w['x'][1]
-num_ex=ex_integral.assemble(basis, uh=basis.interpolate(omega))
-@sf.Functional
-def ey_integral(w):
-   return w['uh']*w['x'][0]
-num_ey=ey_integral.assemble(basis, uh=basis.interpolate(omega))
-ex = num_ex / den
-ey = -num_ey / den
-print("Shear center (ω):", ex, ey)
-Cw = basis.integrate(lambda w: w.u**2, omega)
-print("Warping constant Cw =", Cw)
-interp = basis.interpolate(omega)
-Cw_grad = basis.integrate(lambda w: skfem.helpers.dot(w.grad, w.grad), omega)
-print("Cw (gradient form) =", Cw_grad)
-mplot(m, omega=omega)
-@sf.Integral
-def gradx(w):
-    return w.grad(w.u)[0]
-
-@sf.Integral
-def grady(w):
-    return w.grad(w.u)[1]
-
-# Evaluate gradient at nodes
-omega_grad = basis.interpolate(omega)
-omega_x = omega_grad.grad[0]
-omega_y = omega_grad.grad[1]
-
-theta = 1.0  # unit twist
-
-ux = theta * omega_x
-uy = theta * omega_y
-uz = np.zeros_like(ux)
-
-mplot(m, ux=ux, uy=uy, uz=uz, omega=omega)
-E = 210e9      # Young's modulus (Pa)
-theta = 1.0    # unit twist
-
-sigma_w = E * theta * omega
-@sf.Integral
-def bimoment_integrand(w):
-    return w.u**2
-
-B = E * skfem.asm(bimoment_integrand, basis, omega)
-
-print("Bimoment B =", B)
-
-mplot(m, omega=omega, sigma_w=sigma_w)
-# %%  Prandtl
-# stress function (φ): Laplace = –2
-# \nabla ^2\\phi =-2.
-import numpy as np
-import skfem
-
-# Mesh
-m = skfem.MeshTri().init_symmetric().refined(3)
-
-# Basis
-e = skfem.ElementTriP2()
-basis = skfem.Basis(m, e)
-
-# Bilinear form
-@sf.BilinearForm
-def bilinf(u, v, w):
-    return w.grad(u) @ w.grad(v)
-
-A = skfem.asm(bilinf, basis)
-
-# RHS: ∫ 2 v dA
-@sf.LinearForm
-def rhs(v, w):
-    return 2.0 * v
-
-b = skfem.asm(rhs, basis)
-
-# Dirichlet BC: φ = 0 on boundary
-D = basis.get_dofs().all_boundary()
-A, b = skfem.enforce(A, b, D=D)
-
-# Solve
-phi = skfem.solve(A, b)
-
-@sf.Integral
-def tau_xz(w):
-    return w.grad(w.u)[1]   # dφ/dy
-
-@sf.Integral
-def tau_yz(w):
-    return -w.grad(w.u)[0]  # -dφ/dx
-
-qx = skfem.asm(tau_xz, basis, phi)
-qy = skfem.asm(tau_yz, basis, phi)
-@sf.Integral
-def Vx_integrand(w):
-    return w.grad(w.u)[1]   # qx
-
-@sf.Integral
-def Vy_integrand(w):
-    return -w.grad(w.u)[0]  # qy
-
-Vx = skfem.asm(Vx_integrand, basis, phi)
-Vy = skfem.asm(Vy_integrand, basis, phi)
-@sf.Integral
-def Mx_integrand(w):
-    x, y = w.x
-    return y * (-w.grad(w.u)[0])   # y * qy
-
-@sf.Integral
-def My_integrand(w):
-    x, y = w.x
-    return x * (w.grad(w.u)[1])    # x * qx
-
-Mx = skfem.asm(Mx_integrand, basis, phi)
-My = skfem.asm(My_integrand, basis, phi)
-
-ex = Mx / Vy
-ey = -My / Vx
-
-print("Shear center coordinates:")
-print("e_x =", ex)
-print("e_y =", ey)
-
-# Compute torsion constant J = 2 ∫ φ dA
-@sf.Integral
-def integrand(w):
-    return 2.0 * w.u
-
-J = skfem.asm(integrand, basis, phi)
-
-print("Torsion constant J =", J)
-
-# Save
-m.save('phi.vtk', phi=phi)
-# %% shear‑flow
-# (q): H(div) → Raviart–Thomas RT0
-# \nabla \\cdot \\mathbf{q}=2.
-import numpy as np
-import skfem
-
-# Mesh
-m = skfem.MeshTri().init_symmetric().refined(3)
-
-# RT0 element
-e = skfem.ElementTriRT0()
-basis = skfem.Basis(m, e)
-
-# Bilinear form: mass matrix (q, v)
-@sf.BilinearForm
-def mass(u, v, w):
-    return u @ v
-
-A = skfem.asm(mass, basis)
-
-# RHS: ∫ 2 div(v) dA
-@sf.LinearForm
-def rhs(v, w):
-    return 2.0 * w.div(v)
-
-b = skfem.asm(rhs, basis)
-
-# Solve
-q = skfem.solve(A, b)
-
-# Save vector field
-qx = q[0::2]
-qy = q[1::2]
-m.save('q.vtk', qx=qx, qy=qy)
-'''
