@@ -51,13 +51,23 @@ Typical command needed after update of python is (uv in front if it is used)
 uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh
 ```
 
-## Using sfe
+# Getting sfe examples
 
  * Get code, e.g. by cloning or forking sfe repository
 ```
 PS C:\Users\simon> git clone https://github.com/simo-11/sfe
 ```
- * Start spyder. Spyder can be started also from menus and main_cells.m can be opened from menus
+ * Start spyder. Spyder can be started also from menus and .py files can be opened from menus
 ```
-PS C:\Users\simon\sfe> C:\ProgramData\spyder-6\envs\spyder-runtime\Scripts\spyder.exe main_cells.py
+PS C:\Users\simon\sfe> C:\ProgramData\spyder-6\envs\spyder-runtime\Scripts\spyder.exe warping.py
 ```
+
+# Examples
+
+## warping.py
+Running file imports needed modules and defines a few functions that are described below
+ * test_circle calculates section properties for unit circle using selected elements, meshes and count of refinements. Warping constant gamma should be close to zero and area near pi.
+   * Best results are obtained using ElementTriP2 and MeshTri2 which provide good results using 2 refinements (41 dofs) 
+
+
+
