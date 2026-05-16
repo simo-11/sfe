@@ -651,7 +651,7 @@ scale={scale:.4G}, max warping={max_disp:.4G}
     uc.mp.render()
     return (scale)
 
-def solve(uc):
+def solve_warping(uc):
     uc.t_basis=sf.Basis(uc.t_mesh, uc.elem)
     # Stiffness matrix: ∫ grad(v)·grad(u) dA
     A = sf.asm(laplace, uc.t_basis)
@@ -668,6 +668,26 @@ def solve(uc):
     uc.A=A
     uc.S = sf.solve(A, b)
 
+def solve_bending(uc):
+    p=np.vstack([np.linspace(0,uc.L,uc.b_nelem+1)])
+    t=np.vstack([np.arange(uc.b_nelem),np.arange(1,uc.b_nelem+1)],
+                dtype=np.int32)
+    mesh=sf.MeshLine1(p,t)
+    uc.b_basis=sf.Basis(mesh, uc.b_elem())
+    @sf.LinearForm
+    def a(u, w):
+        return uc.E*uc.sp['ic'][0] * u.grad4
+    @sf.LinearForm
+    def l(v, w):
+        return uc.q * v
+    K = sf.asm(a, uc.b_basis)
+    f = sf.asm(l, uc.b_basis)
+    D = uc.b_basis.get_dofs(lambda x: np.isclose(x[0], 0)).all()
+    K, f = sf.enforce(K, f, D=D, x=0.0)
+    uc.b_S=sf.solve(K, f)
+"""
+solve_bending(uc)
+"""
 def sp(uc):
     """
     Parameters
@@ -708,7 +728,7 @@ def sp(uc):
     t = uc.basis.mesh.t.copy()
     p = p + np.array([[-cx], [-cy]])
     uc.t_mesh=sf.MeshTri2(p,t)
-    solve(uc)
+    solve_warping(uc)
     @sf.Functional
     def i_xw(w):
        return w['uh']*w['x'][1]
@@ -802,6 +822,16 @@ def fill_uc_defaults(uc):
                 uc.units='mm'
             case _:
                 uc.units='?'
+    if not hasattr(uc,'L'):
+        uc.L=2
+    if not hasattr(uc,'E'):
+        uc.E=210E9
+    if not hasattr(uc,'b_nelem'):
+        uc.b_nelem=1
+    if not hasattr(uc,'b_elem'):
+        uc.b_elem=sf.ElementLineHermite
+    if not hasattr(uc,'q'):
+        uc.q=0.8*uc.E*uc.sp['ic'][0]/(uc.L**3)# to get L/10 for cantilever
 
 def test_elements():
     mp_global = globals().get("mp")
