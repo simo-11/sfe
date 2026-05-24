@@ -1,6 +1,8 @@
 # sfe
-[scikit-fem](https://github.com/kinnala/scikit-fem) examples, scikit-fem is a library for performing finite element assembly 
-which provides also for solving small systems
+[scikit-fem](https://github.com/kinnala/scikit-fem) and [taichi](https://github.com/taichi-dev/taichi) examples
+ * scikit-fem is a library for performing finite element assembly which provides also for solving small systems
+ * [taichi](https://www.taichi-lang.org/) provides Productive, portable, and performant GPU programming in Python
+   * taichi does not support latest python versions and taichi-forge does not work out of box, so studies postponed in this context  
 
 # Installations
 
@@ -20,11 +22,11 @@ PS C:\> winget install -e --id astral-sh.uv
 ## Python
 ```
 C:\> uv python install 3.14.4
-github\sfe [main ≡]> uv venv --clear --python 3.14.4
+github\scikit-fem [main ≡]> uv venv --clear --python 3.14.4
 Using CPython 3.14.4
 Creating virtual environment at: .venv
 Activate with: .venv\Scripts\activate
-github\sfe [main ≡]> .venv\Scripts\activate
+github\scikit-fem [main ≡]> .venv\Scripts\activate
 ```
 
 ## [Spyder IDE](https://www.spyder-ide.org/)
@@ -45,13 +47,14 @@ Dependencies can be installed using pip
  * gmsh - geometry and mesh definitions
  * pyvistaqt pyqt5 - requires pyvista and qtpy
  * pytest spyder-unittest - helps running scikit-fem tests with debugger, as noted in https://docs.spyder-ide.org/current/plugins/unittest.html this combination is not working currently
+ * taichi-forge - taichi version which support current components https://pypi.org/project/taichi-forge/, does not work so taichi postponed
 
 Typical command needed after update of python is (uv in front if it is used)
 ```
-uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh
+uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh taichi-forge
 ```
 
-# Getting sfe examples
+# Getting  examples
 
  * Get code, e.g. by cloning or forking sfe repository
 ```
@@ -73,4 +76,4 @@ Running file imports needed modules and defines a few functions that are describ
    * results can be compared with e.g. https://rakenteidenmekaniikka.journal.fi/article/view/163217 
 * test_circle_areas points out that the mesh defines integration limits and element type does not affect the calculation of area.
 
-
+## 
