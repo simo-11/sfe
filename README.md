@@ -1,8 +1,10 @@
 # sfe
-[scikit-fem](https://github.com/kinnala/scikit-fem) and [taichi](https://github.com/taichi-dev/taichi) examples
+[scikit-fem](https://github.com/kinnala/scikit-fem) and other examples
  * scikit-fem is a library for performing finite element assembly which provides also for solving small systems
+ * petsc - the Portable, Extensible Toolkit for Scientific Computation
  * [taichi](https://www.taichi-lang.org/) provides Productive, portable, and performant GPU programming in Python
-   * taichi does not support latest python versions and taichi-forge does not work out of box, so studies postponed in this context  
+   * taichi does not support latest python versions and taichi-forge does not work out of box, so studies postponed in this context
+   * [taichi](https://github.com/taichi-dev/taichi)
 
 # Installations
 
@@ -21,9 +23,9 @@ PS C:\> winget install -e --id astral-sh.uv
 
 ## Python
 ```
-C:\> uv python install 3.14.4
-github\scikit-fem [main ≡]> uv venv --clear --python 3.14.4
-Using CPython 3.14.4
+C:\> uv python install 3.14.6
+github\scikit-fem [main ≡]> uv venv --clear --python 3.14.6
+Using CPython 3.14.6  
 Creating virtual environment at: .venv
 Activate with: .venv\Scripts\activate
 github\scikit-fem [main ≡]> .venv\Scripts\activate
@@ -46,12 +48,16 @@ Dependencies can be installed using pip
  * scikit-fem - main target for this repo, requires numpy and scipy [all] also brings also matplotlib
  * gmsh - geometry and mesh definitions
  * pyvistaqt pyqt5 - requires pyvista and qtpy
+ * mpi4py
+ * petsc4py slepc4py - python interfaces for petsc
+ ** does not work 
  * pytest spyder-unittest - helps running scikit-fem tests with debugger, as noted in https://docs.spyder-ide.org/current/plugins/unittest.html this combination is not working currently
  * taichi-forge - taichi version which support current components https://pypi.org/project/taichi-forge/, does not work so taichi postponed
 
 Typical command needed after update of python is (uv in front if it is used)
 ```
-uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh taichi-forge
+uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh
+uv pip install mpi4py petsc4py slepc4py
 ```
 
 # Getting  examples
