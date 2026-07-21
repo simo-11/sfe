@@ -25,9 +25,10 @@ sp dict of section properties - note use of scale
 scale scaling of dimensions for calculation and plots
 
 TODO:
+  Create RHS and U profiles as scikit-fem Meshes using class Profile
+  - vedo plotting using Mesh.draw(visuals='vedo')
 
-
-For a ready solution and tested solution
+For a ready and tested solution
 see https://sectionproperties.readthedocs.io/
 """
 import json
@@ -48,6 +49,125 @@ import gmsh
 import meshio
 import vtk
 import traceback
+
+common_logger_names=["sfe"
+    ,"sf.Mesh"
+    ]
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+
+    "formatters": {
+        "standard": {
+            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+        },
+        "short": {
+            "format": "%(levelname)s: %(message)s"
+        },
+    },
+
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "standard",
+        },
+        "file": {
+            "class": "logging.handlers.TimedRotatingFileHandler",
+            "level": "DEBUG",
+            "formatter": "standard",
+            "filename": "sfe.log",
+            "encoding": "utf-8",
+        },
+    },
+
+    "loggers": {
+        name: {
+            "level": "DEBUG",
+            "handlers": ["console", "file"],
+            "propagate": False,
+        }
+        for name in common_logger_names
+    },
+
+    "root": {
+        "level": "INFO",
+        "handlers": ["console"]
+    }
+}
+logging.config.dictConfig(LOGGING)
+logger = logging.getLogger("sfe")
+logger.info("Starting")
+
+class Profile:
+    """Mesh generator for RHS and U profiles."""
+
+    @staticmethod
+    def arc(cx, cy, r, a0, a1, n):
+        # Generate arc points
+        th = np.linspace(a0, a1, n)
+        x = cx + r * np.cos(th)
+        y = cy + r * np.sin(th)
+        return np.vstack((x, y))
+
+    @staticmethod
+    def rectangle_with_arcs(b, h, r, n_arc, n_edge):
+        # Straight edges
+        x0 = np.linspace(r, b - r, n_edge)
+        y0 = np.linspace(r, h - r, n_edge)
+
+        # Four arcs
+        a1 = Profile.arc(r, r, r, np.pi, 1.5*np.pi, n_arc)
+        a2 = Profile.arc(b - r, r, r, 1.5*np.pi, 2*np.pi, n_arc)
+        a3 = Profile.arc(b - r, h - r, r, 0, 0.5*np.pi, n_arc)
+        a4 = Profile.arc(r, h - r, r, 0.5*np.pi, np.pi, n_arc)
+
+        # Straight segments between arcs
+        s1 = np.vstack((x0, np.zeros_like(x0)))
+        s2 = np.vstack((np.full_like(y0, b), y0))
+        s3 = np.vstack((x0[::-1], np.full_like(x0, h)))
+        s4 = np.vstack((np.zeros_like(y0), y0[::-1]))
+
+        # Concatenate CCW
+        pts = np.hstack((a1, s1, a2, s2, a3, s3, a4, s4))
+        return pts
+
+    @classmethod
+    def rhs(cls, b, h, t, ri, n_arc=8, n_edge=20):
+        """Rectangular hollow section mesh."""
+        ro = ri + t
+
+        # Outer and inner contours
+        outer = cls.rectangle_with_arcs(b, h, ro, n_arc, n_edge)
+        inner = cls.rectangle_with_arcs(b - 2*t, h - 2*t,
+                                        ri, n_arc, n_edge)
+        inner[0, :] += t
+        inner[1, :] += t
+
+        # Combine contours
+        pts = np.hstack((outer, inner))
+
+        # Build facets
+        n1 = outer.shape[1]
+        n2 = inner.shape[1]
+        facets = []
+
+        # Outer facets
+        for i in range(n1):
+            facets.append([i, (i + 1) % n1])
+
+        # Inner facets (reverse orientation)
+        for i in range(n2):
+            j = n1 + i
+            k = n1 + (i + 1) % n2
+            facets.append([k, j])
+
+        facets = np.array(facets).T
+        return sf.MeshTri(pts, facets)
+#%% test profile.rhs
+# h=0.1, b=0.05, t=0.004, ri=0.004
+rhs = Profile.rhs(b=50, h=100, t=4, ri=4, n_arc=1,n_edge=1)
+#%% test u
 
 def get_curve_info(curve_tag):
     """Return a dictionary with detailed information about a curve entity."""
@@ -589,7 +709,7 @@ def qtplot(uc,scale=None, **kwargs):
     try:
         uc.mp.clear()
     except AttributeError as e:
-        logging.debug(f"First run {e}")
+        logger.debug(f"First run {e}")
     if uc.vtk_tessellate>0:
         smooth_mesh = mesh.tessellate(max_n_subdivide=uc.vtk_tessellate)
     else:
