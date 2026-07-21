@@ -48,7 +48,8 @@ Dependencies can be installed using pip
  * scikit-fem - main target for this repo, requires numpy and scipy [all] also brings also matplotlib
  * gmsh - geometry and mesh definitions
  * pyvistaqt pyqt5 - requires pyvista and qtpy
- * mpi4py
+ * vedo visualization using vtk
+ * mpi4py - message passing library for petsc which does not work with windows
  * petsc4py slepc4py - python interfaces for petsc
  ** does not work 
  * pytest spyder-unittest - helps running scikit-fem tests with debugger, as noted in https://docs.spyder-ide.org/current/plugins/unittest.html this combination is not working currently
@@ -56,8 +57,7 @@ Dependencies can be installed using pip
 
 Typical command needed after update of python is (uv in front if it is used)
 ```
-uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh
-uv pip install mpi4py petsc4py slepc4py
+uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh vedo
 ```
 
 # Getting  examples
