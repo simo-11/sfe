@@ -111,36 +111,43 @@ class Profile:
         return np.vstack((x, y))
 
     @staticmethod
-    def rectangle_with_arcs(b, h, r, n_arc, n_edge):
+    def rectangle_with_arcs(b, h, r, n_arc, nx, ny):
         # Straight edges
-        x0 = np.linspace(r, b - r, n_edge)
-        y0 = np.linspace(r, h - r, n_edge)
-
-        # Four arcs
-        a1 = Profile.arc(r, r, r, np.pi, 1.5*np.pi, n_arc)
-        a2 = Profile.arc(b - r, r, r, 1.5*np.pi, 2*np.pi, n_arc)
-        a3 = Profile.arc(b - r, h - r, r, 0, 0.5*np.pi, n_arc)
-        a4 = Profile.arc(r, h - r, r, 0.5*np.pi, np.pi, n_arc)
-
+        xe=b-r
+        ye=h-r
+        x0 = np.linspace(r, xe, nx)
+        x1 = np.linspace(xe, r, nx)
+        y0 = np.linspace(r, ye, ny)
+        y1 = np.linspace(ye, r, ny)
         # Straight segments between arcs
         s1 = np.vstack((x0, np.zeros_like(x0)))
         s2 = np.vstack((np.full_like(y0, b), y0))
-        s3 = np.vstack((x0[::-1], np.full_like(x0, h)))
-        s4 = np.vstack((np.zeros_like(y0), y0[::-1]))
-
+        s3 = np.vstack((x1, np.full_like(x1, h)))
+        s4 = np.vstack((np.zeros_like(y1), y1))
         # Concatenate CCW
-        pts = np.hstack((a1, s1, a2, s2, a3, s3, a4, s4))
+        if n_arc>0:
+            # Four arcs
+            a1 = Profile.arc(r, r, r, np.pi, 1.5*np.pi, n_arc)
+            a2 = Profile.arc(b - r, r, r, 1.5*np.pi, 2*np.pi, n_arc)
+            a3 = Profile.arc(b - r, h - r, r, 0, 0.5*np.pi, n_arc)
+            a4 = Profile.arc(r, h - r, r, 0.5*np.pi, np.pi, n_arc)
+            pts = np.hstack((a1, s1, a2, s2, a3, s3, a4, s4))
+        else:
+            pts=np.hstack((s1,s2,s3,s4))
         return pts
 
     @classmethod
-    def rhs(cls, b, h, t, ri, n_arc=8, n_edge=20, draw=False):
+    def rhs(cls, b, h, t, ri=0, n_arc=0, nx=1, ny=1, draw=False):
         """Rectangular hollow section mesh."""
-        ro = ri + t
-
+        if n_arc>0:
+            ro = ri + t
+        else:
+            ro=0
+            ri=0
         # Outer and inner contours
-        outer = cls.rectangle_with_arcs(b, h, ro, n_arc, n_edge)
+        outer = cls.rectangle_with_arcs(b, h, ro, n_arc, nx,ny)
         inner = cls.rectangle_with_arcs(b - 2*t, h - 2*t,
-                                        ri, n_arc, n_edge)
+                                        ri, n_arc, nx,ny)
         inner[0, :] += t
         inner[1, :] += t
 
@@ -149,19 +156,10 @@ class Profile:
 
         # Build facets
         n1 = outer.shape[1]
-        n2 = inner.shape[1]
         facets = []
-
-        # Outer facets
         for i in range(n1):
-            facets.append([i, (i + 1) % n1])
-
-        # Inner facets (reverse orientation)
-        for i in range(n2):
-            j = n1 + i
-            k = n1 + (i + 1) % n2
-            facets.append([k, j])
-
+            facets.append([i, (i + 1), (i+n1)])
+            facets.append([i+1, (i + 1 + n1), (i+n1)])
         facets = np.array(facets).T
         mesh=sf.MeshTri(pts, facets)
         if not mesh.is_valid():
@@ -180,7 +178,7 @@ class Profile:
                 y=pts[1][i]
                 txt=f"{i} ({x:.3G},{y:.3G})"
                 sb.append(txt)
-                t = vedo.Text3D(txt, s=size,font="VTK")
+                t = vedo.Text3D(str(i), s=size,font="VTK")
                 t.pos(x+xoffset,y+yoffset)
                 vp.add_actor(t.actor)
             vp.render()
@@ -1106,8 +1104,8 @@ gmsh_plot=True
 #%% test_elements
 ucs=test_elements()
 #%% test profile.rhs
-# h=0.1, b=0.05, t=0.004, ri=0.004
-rhs = Profile.rhs(b=50, h=100, t=4, ri=4, n_arc=1,n_edge=1)
+rhs0 = Profile.rhs(b=50, h=100, t=4)
+rhs1 = Profile.rhs(b=50, h=100, t=4, ri=4, n_arc=1)
 #%% test u
 #%% test circle
 # qtplot(ccs[0])
