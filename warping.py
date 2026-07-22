@@ -50,8 +50,23 @@ import vtk
 import vedo
 import traceback
 
-common_logger_names=["sfe"
-    ,"sf.Mesh"
+def reset_logging():
+    root = logging.getLogger()
+    for h in root.handlers[:]:
+        root.removeHandler(h)
+        h.close()
+    root.setLevel(logging.NOTSET)
+    for name, logger in logging.Logger.manager.loggerDict.items():
+        if isinstance(logger, logging.Logger):
+            for h in logger.handlers[:]:
+                logger.removeHandler(h)
+                h.close()
+            logger.setLevel(logging.NOTSET)
+
+reset_logging()
+
+debug_logger_names=["sfe"
+    #,"skfem"
     ]
 LOGGING = {
     "version": 1,
@@ -87,7 +102,7 @@ LOGGING = {
             "handlers": ["console", "file"],
             "propagate": False,
         }
-        for name in common_logger_names
+        for name in debug_logger_names
     },
 
     "root": {
