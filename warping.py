@@ -26,7 +26,6 @@ scale scaling of dimensions for calculation and plots
 
 TODO:
   Create RHS and U profiles as scikit-fem Meshes using class Profile
-  - vedo plotting using Mesh.draw(visuals='vedo')
 
 For a ready and tested solution
 see https://sectionproperties.readthedocs.io/
@@ -48,6 +47,7 @@ import matplotlib.pyplot as plt
 import gmsh
 import meshio
 import vtk
+import vedo
 import traceback
 
 common_logger_names=["sfe"
@@ -133,7 +133,7 @@ class Profile:
         return pts
 
     @classmethod
-    def rhs(cls, b, h, t, ri, n_arc=8, n_edge=20):
+    def rhs(cls, b, h, t, ri, n_arc=8, n_edge=20, draw=False):
         """Rectangular hollow section mesh."""
         ro = ri + t
 
@@ -163,11 +163,34 @@ class Profile:
             facets.append([k, j])
 
         facets = np.array(facets).T
-        return sf.MeshTri(pts, facets)
-#%% test profile.rhs
-# h=0.1, b=0.05, t=0.004, ri=0.004
-rhs = Profile.rhs(b=50, h=100, t=4, ri=4, n_arc=1,n_edge=1)
-#%% test u
+        mesh=sf.MeshTri(pts, facets)
+        if not mesh.is_valid():
+            vp=start_vp()
+            p = vedo.Points(pts.T, r=10, c='red')
+            vp.add_actor(p.actor)
+            bb = np.ptp(p.points, axis=0)
+            diag = np.linalg.norm(bb)
+            size=0.02*diag
+            xoffset=size/3
+            yoffset=size/7
+            sb=[]
+            sb.append("p")
+            for i, p in enumerate(pts.T):
+                x=pts[0][i]
+                y=pts[1][i]
+                txt=f"{i} ({x:.3G},{y:.3G})"
+                sb.append(txt)
+                t = vedo.Text3D(txt, s=size,font="VTK")
+                t.pos(x+xoffset,y+yoffset)
+                vp.add_actor(t.actor)
+            vp.render()
+            sb.append("t")
+            sb.append(str(facets))
+            logger.warning("\n".join(sb))
+        mesh.is_valid(raise_=True)
+        if draw:
+            mesh.draw(visuals='vedo')
+        return mesh
 
 def get_curve_info(curve_tag):
     """Return a dictionary with detailed information about a curve entity."""
@@ -655,6 +678,17 @@ def start_mp(nrows=1, ncols=2,**kwargs):
         mp = pyvistaqt.MultiPlotter(**params)
     return mp
 
+def start_vp():
+    global vp
+    if "vp" in globals():
+        vp.clear()
+        vp.render()
+    else:
+        vp_mp = pyvistaqt.MultiPlotter(nrows=1,ncols=1)
+        vp=vp_mp[0,0]
+        vp.show()
+    return vp
+
 def mplot(mesh: sf.mesh.Mesh, **fields):
     """
     mesh: skfem.Mesh
@@ -1069,9 +1103,12 @@ do_qtplot=True
 do_sp=True
 do_list_entities=False
 gmsh_plot=True
-"""
+#%% test_elements
 ucs=test_elements()
-"""
+#%% test profile.rhs
+# h=0.1, b=0.05, t=0.004, ri=0.004
+rhs = Profile.rhs(b=50, h=100, t=4, ri=4, n_arc=1,n_edge=1)
+#%% test u
 #%% test circle
 # qtplot(ccs[0])
 # qtplot(ccs[1])
