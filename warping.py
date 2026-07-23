@@ -152,7 +152,10 @@ class Profile:
         return pts
 
     @classmethod
-    def rhs(cls, b, h, t, ri=0, n_arc=0, nx=1, ny=1, draw=False):
+    def rhs(cls, b, h, t,
+            ri=0, n_arc=0, nx=1, ny=1,
+            element: sf.Element=sf.ElementTriP1,
+            draw=False):
         """Rectangular hollow section mesh."""
         if n_arc>0:
             ro = ri + t
@@ -172,38 +175,54 @@ class Profile:
         # Build facets
         n1 = outer.shape[1]
         facets = []
-        for i in range(n1):
-            facets.append([i, (i + 1), (i+n1)])
-            facets.append([i+1, (i + 1 + n1), (i+n1)])
+        match element:
+            case sf.ElementTriP1:
+                for i in range(n1):
+                    ipn1=i+n1
+                    r1=(i + 1)%n1
+                    facets.append([i, r1, ipn1])
+                    facets.append([r1, r1 + n1, ipn1])
+            case _:
+                raise TypeError(f"non supported element: {element!r}")
         facets = np.array(facets).T
         mesh=sf.MeshTri(pts, facets)
         if not mesh.is_valid():
-            vp=start_vp()
-            p = vedo.Points(pts.T, r=10, c='red')
-            vp.add_actor(p.actor)
-            bb = np.ptp(p.points, axis=0)
-            diag = np.linalg.norm(bb)
-            size=0.02*diag
-            xoffset=size/3
-            yoffset=size/7
-            sb=[]
-            sb.append("p")
-            for i, p in enumerate(pts.T):
-                x=pts[0][i]
-                y=pts[1][i]
-                txt=f"{i} ({x:.3G},{y:.3G})"
-                sb.append(txt)
-                t = vedo.Text3D(str(i), s=size,font="VTK")
-                t.pos(x+xoffset,y+yoffset)
-                vp.add_actor(t.actor)
-            vp.render()
-            sb.append("t")
-            sb.append(str(facets))
-            logger.warning("\n".join(sb))
-        mesh.is_valid(raise_=True)
+            vedo_plot_mesh(mesh,logging.WARNING)
+            mesh.is_valid(raise_=True)
+        uc=types.SimpleNamespace(elem=element())
+        uc.model=Model.RHS
+        uc.basis=sf.Basis(mesh,uc.elem)
+        fill_uc_defaults(uc)
         if draw:
-            mesh.draw(visuals='vedo')
-        return mesh
+            vedo_plot_mesh(mesh,logging.DEBUG)
+        return uc
+
+def vedo_plot_mesh(mesh: sf.Mesh,log_level):
+    vp=start_vp()
+    p = vedo.Points(mesh.p.T, r=10, c='red')
+    vp.add_actor(p.actor)
+    bb = np.ptp(p.points, axis=0)
+    diag = np.linalg.norm(bb)
+    size=0.02*diag
+    xoffset=size/3
+    yoffset=size/7
+    if logger.isEnabledFor(log_level):
+        sb=[]
+        sb.append("ved_plot_mesh: p")
+    for i, p in enumerate(mesh.p.T):
+        x=mesh.p[0][i]
+        y=mesh.p[1][i]
+        t = vedo.Text3D(str(i), s=size,font="VTK")
+        t.pos(x+xoffset,y+yoffset)
+        vp.add_actor(t.actor)
+        if logger.isEnabledFor(log_level):
+            txt=f"{i} ({x:.3G},{y:.3G})"
+            sb.append(txt)
+    vp.render()
+    if logger.isEnabledFor(log_level):
+        sb.append("t")
+        sb.append(str(mesh.t))
+        logger.log(log_level,"\n".join(sb))
 
 def get_curve_info(curve_tag):
     """Return a dictionary with detailed information about a curve entity."""
@@ -268,7 +287,7 @@ def sf_to_pyvista(uc,z:np.ndarray):
     points_3d = np.column_stack((coords.T, z))
     cells_sf = uc.basis.element_dofs.T
     n_elements, nodes_per_elem = cells_sf.shape
-# 3. VTK Type and Node Reordering
+    # VTK Type and Node Reordering
     # Reorders skfem mid-nodes to VTK standard sequence
     configs = {
         3:  (5,  [0, 1, 2]),               # Tri P1
@@ -283,18 +302,14 @@ def sf_to_pyvista(uc,z:np.ndarray):
         raise ValueError(f"{nodes_per_elem} nodes_per_elem is not supported")
     vtk_type, reorder = config
     cells_reordered = cells_sf[:, reorder]
-
-    # 4. Construct PyVista Grid
+    # Construct PyVista Grid
     padding = np.full((n_elements, 1), nodes_per_elem, dtype=cells_sf.dtype)
     cells_pv = np.hstack((padding, cells_reordered)).ravel()
     cell_types = np.full(n_elements, vtk_type, dtype=np.uint8)
-
     grid = pv.UnstructuredGrid(cells_pv, cell_types, points_3d)
-
-    # 5. Scalar Data Mapping
+    # Scalar Data Mapping
     # Attach Z-values as point data for color mapping
     grid.point_data["warping"] = z
-
     return grid
 
 def gmsh_to_pyvista():
@@ -997,7 +1012,7 @@ def fill_uc_defaults(uc):
         uc.b_nelem=1
     if not hasattr(uc,'b_elem'):
         uc.b_elem=sf.ElementLineHermite
-    if not hasattr(uc,'q'):
+    if not hasattr(uc,'q') and hasattr(uc,'sp'):
         uc.q=0.8*uc.E*uc.sp['ic'][0]/(uc.L**3)# to get L/10 for cantilever
 
 def test_elements():
