@@ -120,7 +120,7 @@ class Profile:
     @staticmethod
     def arc(cx, cy, r, a0, a1, n):
         # Generate arc points
-        th = np.linspace(a0, a1, n)
+        th = np.linspace(a0, a1, n, endpoint=False)
         x = cx + r * np.cos(th)
         y = cy + r * np.sin(th)
         return np.vstack((x, y))
@@ -130,10 +130,10 @@ class Profile:
         # Straight edges
         xe=b-r
         ye=h-r
-        x0 = np.linspace(r, xe, nx)
-        x1 = np.linspace(xe, r, nx)
-        y0 = np.linspace(r, ye, ny)
-        y1 = np.linspace(ye, r, ny)
+        x0 = np.linspace(r, xe, nx, endpoint=False)
+        x1 = np.linspace(xe, r, nx, endpoint=False)
+        y0 = np.linspace(r, ye, ny, endpoint=False)
+        y1 = np.linspace(ye, r, ny, endpoint=False)
         # Straight segments between arcs
         s1 = np.vstack((x0, np.zeros_like(x0)))
         s2 = np.vstack((np.full_like(y0, b), y0))
@@ -198,6 +198,7 @@ class Profile:
         return uc
 
 def vedo_plot_mesh(mesh: sf.Mesh,log_level):
+    from vtk.util.numpy_support import numpy_to_vtk
     vp=start_vp()
     p = vedo.Points(mesh.p.T, r=10, c='red')
     vp.add_actor(p.actor)
@@ -208,7 +209,7 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level):
     yoffset=size/7
     if logger.isEnabledFor(log_level):
         sb=[]
-        sb.append("ved_plot_mesh: p")
+        sb.append("vedo_plot_mesh: p")
     for i, p in enumerate(mesh.p.T):
         x=mesh.p[0][i]
         y=mesh.p[1][i]
@@ -218,6 +219,36 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level):
         if logger.isEnabledFor(log_level):
             txt=f"{i} ({x:.3G},{y:.3G})"
             sb.append(txt)
+    pts = mesh.p.T.copy()
+    if pts.shape[1]==2:
+        z = np.zeros((pts.shape[0],1))
+        pts = np.hstack([pts, z])
+    cells = mesh.t.T
+    vtk_pts = vtk.vtkPoints()
+    vtk_array = numpy_to_vtk(
+        pts, deep=False, array_type=vtk.VTK_FLOAT
+    )
+    vtk_pts.SetData(vtk_array)
+    ugrid = vtk.vtkUnstructuredGrid()
+    ugrid.SetPoints(vtk_pts)
+    mapping = {
+        3: vtk.VTK_TRIANGLE,
+        6: vtk.VTK_QUADRATIC_TRIANGLE,
+        10: vtk.VTK_LAGRANGE_TRIANGLE
+    }
+    for cell in cells:
+        nverts = len(cell)
+        ctype = mapping.get(nverts, vtk.VTK_POLYGON)
+        ugrid.InsertNextCell(ctype, nverts, cell.astype(np.int64))
+    vm=vedo.Mesh(ugrid)
+    f = vtk.vtkExtractEdges()
+    f.SetInputData(vm.dataset)
+    f.Update()
+    edges = vedo.Mesh(f.GetOutput())
+    edges.c("black").lw(1)
+    vm.alpha(0.2).c("cyan")
+    vp.add_actor(vm.actor)
+    vp.add_actor(edges.actor)
     vp.render()
     if logger.isEnabledFor(log_level):
         sb.append("t")
@@ -1134,7 +1165,7 @@ gmsh_plot=True
 #%% test_elements
 ucs=test_elements()
 #%% test profile.rhs
-rhs0 = Profile.rhs(b=50, h=100, t=4)
+rhs0 = Profile.rhs(b=50, h=100, t=4, draw=True)
 rhs1 = Profile.rhs(b=50, h=100, t=4, ri=4, n_arc=1)
 #%% test u
 #%% test circle
