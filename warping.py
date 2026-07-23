@@ -200,6 +200,7 @@ class Profile:
 def vedo_plot_mesh(mesh: sf.Mesh,log_level):
     from vtk.util.numpy_support import numpy_to_vtk
     vp=start_vp()
+    renderer = vp.renderer
     p = vedo.Points(mesh.p.T, r=10, c='red')
     vp.add_actor(p.actor)
     bb = np.ptp(p.points, axis=0)
@@ -210,15 +211,6 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level):
     if logger.isEnabledFor(log_level):
         sb=[]
         sb.append("vedo_plot_mesh: p")
-    for i, p in enumerate(mesh.p.T):
-        x=mesh.p[0][i]
-        y=mesh.p[1][i]
-        t = vedo.Text3D(str(i), s=size,font="VTK")
-        t.pos(x+xoffset,y+yoffset)
-        vp.add_actor(t.actor)
-        if logger.isEnabledFor(log_level):
-            txt=f"{i} ({x:.3G},{y:.3G})"
-            sb.append(txt)
     pts = mesh.p.T.copy()
     if pts.shape[1]==2:
         z = np.zeros((pts.shape[0],1))
@@ -249,6 +241,17 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level):
     vm.alpha(0.2).c("cyan")
     vp.add_actor(vm.actor)
     vp.add_actor(edges.actor)
+    renderer.SetDraw(False)
+    for i, p in enumerate(mesh.p.T):
+        x=mesh.p[0][i]
+        y=mesh.p[1][i]
+        t = vedo.Text3D(str(i), s=size,font="VTK")
+        t.pos(x+xoffset,y+yoffset)
+        vp.add_actor(t.actor)
+        if logger.isEnabledFor(log_level):
+            txt=f"{i} ({x:.3G},{y:.3G})"
+            sb.append(txt)
+    renderer.SetDraw(True)
     vp.render()
     if logger.isEnabledFor(log_level):
         sb.append("t")
