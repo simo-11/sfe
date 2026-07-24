@@ -152,7 +152,7 @@ class Profile:
         return pts
 
     @classmethod
-    def rhs(cls, b, h, t,
+    def rhs(cls, h, b, t,
             ri=0, n_arc=0, nx=1, ny=1,
             element: sf.Element=sf.ElementTriP1,
             draw=False):
@@ -190,11 +190,17 @@ class Profile:
             vedo_plot_mesh(mesh,logging.WARNING)
             mesh.is_valid(raise_=True)
         uc=types.SimpleNamespace(elem=element())
+        uc.profile=f'RHS {h}x{b}x{t} ri={ri}'
         uc.model=Model.RHS
         uc.basis=sf.Basis(mesh,uc.elem)
         fill_uc_defaults(uc)
+        sp(uc)
+        report_sp(uc)
         if draw:
             vedo_plot_mesh(mesh,logging.DEBUG)
+            start_mp(nrows=1,ncols=1)
+            uc.mp=mp[0,0]
+            qtplot(uc,scale=-0.1)
         return uc
 
 def vedo_plot_mesh(mesh: sf.Mesh,log_level):
@@ -482,8 +488,8 @@ def finalize_mesh(uc):
         list_entities()
     meshio_mesh = gmsh_to_meshio()
      # --- Optional PyVista plot ---
-    if gmsh_plot:
-        amp=mp[0,min(uc.elem.maxdeg-1,1)]
+    if gmsh_plot and hasattr(uc,'mp'):
+        amp=uc.mp[0,min(uc.elem.maxdeg-1,1)]
         amp.clear()
         amp.add_text(('gmsh mesh for '
                       f'{uc.model} using {uc.name}')
@@ -732,7 +738,10 @@ def start_mp(nrows=1, ncols=2,**kwargs):
     params.update(kwargs)
     if not "mp" in globals():
         mp = pyvistaqt.MultiPlotter(**params)
-    if mp._nrows != nrows or mp._ncols != ncols:
+    if (mp._nrows != nrows
+        or mp._ncols != ncols
+        or not hasattr(mp[0,0].renderer,'actors')
+        ):
         mp.close()
         mp = pyvistaqt.MultiPlotter(**params)
     return mp
@@ -937,10 +946,11 @@ def sp(uc):
     ixy=i_xy.assemble(uc.basis)
     sp["c"]=[cx,cy]
     sp["ic"]=[ixx,iyy,ixy]
-    p = uc.basis.mesh.p.copy()
-    t = uc.basis.mesh.t.copy()
+    m=uc.basis.mesh
+    p = m.p.copy()
+    t = m.t.copy()
     p = p + np.array([[-cx], [-cy]])
-    uc.t_mesh=sf.MeshTri2(p,t)
+    uc.t_mesh=type(m)(p,t)
     solve_warping(uc)
     @sf.Functional
     def i_xw(w):
@@ -974,7 +984,8 @@ def report_sp(uc):
     scale=uc.mesh_scale
     m4=scale**4
     m6=scale**6
-    print(f'''Section properties using {uc.name}, {uc.basis.N} DOFs
+    print(f'''Section properties for {uc.profile}
+  using {uc.name}, {uc.basis.N} DOFs
   area={uc.sp['area']/(scale**2):.6G}
   c=[{uc.sp['c'][0]/scale:.6G},{uc.sp['c'][1]/scale:.6G}]
   ic=[{uc.sp['ic'][0]/m4:.6G}, \
@@ -1005,6 +1016,8 @@ def deep_getattr(obj, path, suffix='-',default=''):
     return f"{obj}{suffix}"
 
 def fill_uc_defaults(uc):
+    if not hasattr(uc,'profile'):
+        uc.profile='Profile info not available'
     if not hasattr(uc,'name'):
         if hasattr(uc,'basis'):
             uc.name=(f'{type(uc.basis.mesh).__name__}, '
@@ -1092,31 +1105,50 @@ def test_elements():
                 match model:
                     case Model.SQUARE:
                         qtplot_scale=-0.3
+                        h=0.1
+                        b=h
+                        uc.profile=f'Square {h}'
                         uc.basis = rect_mesh(uc
-                                      ,mesh_scale*0.1
-                                      ,mesh_scale*0.1)
+                                      ,mesh_scale*h
+                                      ,mesh_scale*b)
                     case Model.CIRCLE:
                         qtplot_scale=-0.3
+                        h=1
+                        b=h
+                        uc.profile=f'Circle {h}'
                         uc.basis = ellipse_mesh(uc
-                                      ,mesh_scale*1
-                                      ,mesh_scale*1
+                                      ,mesh_scale*h
+                                      ,mesh_scale*b
                                       ,ms=mesh_scale*ms)
                     case Model.RECTANGLE:
+                        h=0.1
+                        b=0.01
+                        uc.profile=f'Rectangle {h}x{b}'
                         uc.basis = rect_mesh(uc
-                                      ,mesh_scale*0.1
-                                      ,mesh_scale*0.01)
+                                      ,mesh_scale*h
+                                      ,mesh_scale*b)
                     case Model.U:
+                        h=0.1
+                        b=0.05
+                        t=0.004
+                        ri=0.004
+                        uc.profile=f'U {h}x{b}x{t} ri={ri}'
                         uc.basis = u_mesh(uc
-                                      ,mesh_scale*0.1
-                                      ,mesh_scale*0.05
-                                      ,mesh_scale*0.004
-                                      ,mesh_scale*0.004)
+                                      ,mesh_scale*h
+                                      ,mesh_scale*b
+                                      ,mesh_scale*t
+                                      ,mesh_scale*ri)
                     case Model.RHS:
+                        h=0.15
+                        b=0.15
+                        t=0.008
+                        ri=0.008
+                        uc.profile=f'RHS {h}x{b}x{t} ri={ri}'
                         uc.basis = rhs_mesh(uc
-                                      ,mesh_scale*0.15
-                                      ,mesh_scale*0.15
-                                      ,mesh_scale*0.008
-                                      ,mesh_scale*0.008)
+                                      ,mesh_scale*h
+                                      ,mesh_scale*b
+                                      ,mesh_scale*t
+                                      ,mesh_scale*ri)
                     case _:
                         raise ValueError(f"model {model} is not supported")
                 print(f'Model={uc.model}, nvertices={uc.basis.mesh.nvertices}')
@@ -1165,8 +1197,7 @@ gmsh_plot=True
 #%% test_elements
 ucs=test_elements()
 #%% test profile.rhs
-rhs0 = Profile.rhs(b=50, h=100, t=4, draw=True)
-rhs1 = Profile.rhs(b=50, h=100, t=4, ri=4, n_arc=1)
+rhs0 = Profile.rhs(b=0.15, h=0.15, t=0.008, ri=0.008,n_arc=4, draw=True)
 #%% test u
 #%% test circle
 # qtplot(ccs[0])
