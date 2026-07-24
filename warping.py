@@ -190,7 +190,7 @@ class Profile:
             vedo_plot_mesh(mesh,logging.WARNING)
             mesh.is_valid(raise_=True)
         uc=types.SimpleNamespace(elem=element())
-        uc.profile=f'RHS {h}x{b}x{t} ri={ri}'
+        uc.profile=f'RHS {h}x{b}x{t} ri={ri} n_arc={n_arc} nx={nx} ny={ny}'
         uc.model=Model.RHS
         uc.basis=sf.Basis(mesh,uc.elem)
         fill_uc_defaults(uc)
@@ -198,7 +198,7 @@ class Profile:
         report_sp(uc)
         if draw:
             vedo_plot_mesh(mesh,logging.DEBUG)
-            start_mp(nrows=1,ncols=1)
+            start_mp(ncols=1)
             uc.mp=mp[0,0]
             qtplot(uc,scale=-0.1)
         return uc
@@ -783,6 +783,9 @@ def mplot(mesh: sf.mesh.Mesh, **fields):
 
 def qtplot(uc,scale=None, **kwargs):
     fill_uc_defaults(uc)
+    if not hasattr(uc, 'mp'):
+        start_mp(ncols=1)
+        uc.mp=mp[0,0]
     just_mesh=False
     coords=uc.basis.doflocs
     if not hasattr(uc,'S') or uc.S is None or np.isnan(uc.S).any():
@@ -1058,6 +1061,15 @@ def fill_uc_defaults(uc):
         uc.b_elem=sf.ElementLineHermite
     if not hasattr(uc,'q') and hasattr(uc,'sp'):
         uc.q=0.8*uc.E*uc.sp['ic'][0]/(uc.L**3)# to get L/10 for cantilever
+
+def refine(src: types.SimpleNamespace,times: int)->types.SimpleNamespace:
+    uc=copy.copy(src)
+    m=src.basis.mesh
+    mesh=(type(m))(m.p,m.t).refined(times)
+    uc.basis=sf.Basis(mesh,src.elem)
+    sp(uc)
+    report_sp(uc)
+    return uc
 
 def test_elements():
     mp_global = globals().get("mp")
