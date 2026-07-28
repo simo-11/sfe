@@ -31,7 +31,7 @@ TODO:
     uc.basis.probes(P)@uc.S
     values and gradients using probe_value_and_grad
 
-For a ready and tested solution
+For a ready and tested solution for section properties
 see https://sectionproperties.readthedocs.io/
 """
 import json
@@ -301,7 +301,11 @@ def probe_value_and_grad(uc, P):
         X = P[:, ip]
         x=X[0]
         y=X[1]
-        cells=ef([x],[y])
+        try:
+            cells=ef([x],[y])
+        except ValueError as e:
+            logger.warn(f'Got "{e}" for {X}')
+            continue
         k=cells[0]
         # local DOFs and their values
         dofs_k = basis.dofs.get_element_dofs(k).all()
