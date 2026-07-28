@@ -25,7 +25,11 @@ sp dict of section properties - note use of scale
 scale scaling of dimensions for calculation and plots
 
 TODO:
-  Create RHS and U profiles as scikit-fem Meshes using class Profile
+  - Create RHS and U profiles as scikit-fem Meshes using class Profile
+  - plot shear stress distribution using probes
+    warping values at given points P(2,N) can be obtained
+    uc.basis.probes(P)@uc.S
+    gradients are also needed but process is not yet found
 
 For a ready and tested solution
 see https://sectionproperties.readthedocs.io/
@@ -260,6 +264,77 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level):
         sb.append("t")
         sb.append(str(mesh.t))
         logger.log(log_level,"\n".join(sb))
+
+def probe_value_and_grad(uc, P):
+    """
+    Evaluate scalar H1 solution and its gradient at global points P
+    for triangular isoparametric elements (ElementTriP1/P2/P3) using
+    MappingIsoparametric.
+
+    Parameters
+    ----------
+    uc.S : ndarray
+        Global DOF vector, shape (ndofs,).
+    uc.basis : skfem.CellBasis
+        CellBasis built with isoparametric mapping (MappingIsoparametric).
+    P : ndarray
+        Global points, shape (dim, npoints).
+
+    Returns
+    -------
+    values : ndarray, shape (npoints,)
+    grads  : ndarray, shape (dim, npoints)
+    """
+    u=uc.S
+    basis=uc.basis
+    mesh = basis.mesh
+    elem = basis.elem
+    mapping = basis.mapping
+
+    dim = mesh.dim()
+    npoints = P.shape[1]
+
+    values = np.zeros(npoints)
+    grads = np.zeros((dim, npoints))
+    mesh.element_finder()# initialize mesh._cached_tree
+    tree=mesh._cached_tree
+    for ip in range(npoints):
+        x = P[:, ip]
+        # element index k
+        # this is not robust and
+        # a more robust point-in-element test is needed for general usage
+        d,k=tree.query(np.array([x[0], x[1]]).T,1)
+        # local DOFs and their values
+        dofs_k = basis.dofs[k]
+        u_local = u[dofs_k]
+        nloc = len(dofs_k)
+
+        # prepare x for MappingIsoparametric.invF: (dim, Nelems, Nqp)
+        x_glob = x.reshape(dim, 1, 1)
+        xi_all = mapping.invF(x_glob, tind=np.array([k]))
+        xi = xi_all[:, 0, 0]  # (dim,)
+
+        # Jacobian inverse at xi: shape (dim, dim, Nelems, Nqp)
+        invDF_all = mapping.invDF(xi.reshape(dim, 1), tind=np.array([k]))
+        invDF = invDF_all[:, :, 0, 0]  # (dim, dim)
+
+        val_p = 0.0
+        grad_p = np.zeros(dim)
+
+        for i in range(nloc):
+            phi_i, dphi_ref = elem.lbasis(xi, i)  # dphi_ref: (dim,)
+
+            # physical gradient of basis function
+            grad_phi_i = invDF @ dphi_ref  # (dim,)
+
+            ui = u_local[i]
+            val_p += phi_i * ui
+            grad_p += grad_phi_i * ui
+
+        values[ip] = val_p
+        grads[:, ip] = grad_p
+
+    return values, grads
 
 def get_curve_info(curve_tag):
     """Return a dictionary with detailed information about a curve entity."""
@@ -747,7 +822,7 @@ def start_mp(nrows=1, ncols=2,**kwargs):
     return mp
 
 def start_vp():
-    global vp
+    global vp,vp_mp
     if "vp" in globals():
         vp.clear()
         vp.render()
