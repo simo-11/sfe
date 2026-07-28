@@ -29,7 +29,7 @@ TODO:
   - plot shear stress distribution using probes
     warping values at given points P(2,N) can be obtained
     uc.basis.probes(P)@uc.S
-    gradients are also needed but process is not yet found
+    values and gradients using probe_value_and_grad
 
 For a ready and tested solution
 see https://sectionproperties.readthedocs.io/
@@ -267,7 +267,7 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level):
 
 def probe_value_and_grad(uc, P):
     """
-    Evaluate scalar H1 solution and its gradient at global points P
+    Evaluate scalar solution and its gradient at global points P
     for triangular isoparametric elements (ElementTriP1/P2/P3) using
     MappingIsoparametric.
 
@@ -296,21 +296,20 @@ def probe_value_and_grad(uc, P):
 
     values = np.zeros(npoints)
     grads = np.zeros((dim, npoints))
-    mesh.element_finder()# initialize mesh._cached_tree
-    tree=mesh._cached_tree
+    ef=mesh.element_finder()
     for ip in range(npoints):
-        x = P[:, ip]
-        # element index k
-        # this is not robust and
-        # a more robust point-in-element test is needed for general usage
-        d,k=tree.query(np.array([x[0], x[1]]).T,1)
+        X = P[:, ip]
+        x=X[0]
+        y=X[1]
+        cells=ef([x],[y])
+        k=cells[0]
         # local DOFs and their values
-        dofs_k = basis.dofs[k]
+        dofs_k = basis.dofs.get_element_dofs(k).all()
         u_local = u[dofs_k]
         nloc = len(dofs_k)
 
         # prepare x for MappingIsoparametric.invF: (dim, Nelems, Nqp)
-        x_glob = x.reshape(dim, 1, 1)
+        x_glob = X.reshape(dim, 1, 1)
         xi_all = mapping.invF(x_glob, tind=np.array([k]))
         xi = xi_all[:, 0, 0]  # (dim,)
 
