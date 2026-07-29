@@ -10,15 +10,18 @@ Supported elements are linear and quadratic triangles.
 Supported sections are square, rectangle, RSH and U.
 Main target is SHS.
 
-Most routines use parameter uc which is SimpleNamespace
+Most routines use parameter uc which is types.SimpleNamespace
 containing e.g.
 model enum
+profile text description of profile
 elem scikit-element -> basis.elem
 name short str based on element e.g. TriP2
-basis CellBasis
+basis sf.assembly.basis.CellBasis
   N Number of DOFs
   doflocs - coordinates of nodes for scikit-solution, (2,N) in this context
   element_dofs - element topology, int32:s refer to doflocs
+  mesh sf.mesh.mesh.Mesh
+  elem sf.element.Element
 t_basis copy of basis transferred to centroid
 S solution of warping function
 sp dict of section properties - note use of scale
@@ -118,6 +121,20 @@ logging.config.dictConfig(LOGGING)
 logger = logging.getLogger("sfe")
 logger.info("Starting")
 
+def validate_mesh_parameters(nx=None, ny=None,
+    element: sf.Element=sf.ElementTriP1,n_arc=0) ->(int,int):
+    maxdeg=element.maxdeg
+    if nx==None:
+        nx=maxdeg
+    if ny==None:
+        ny=maxdeg
+    for n in [nx,ny,n_arc]:
+        if not (n%maxdeg)==0:
+            raise ValueError((f"nx({nx}), ny({ny}) and n_arc({n_arc}) "
+                      f"must be divisible by {maxdeg}"
+                      f" for element: {element!r} but {n} is not"))
+    return nx,ny
+
 class Profile:
     """Mesh generator for RHS and U profiles."""
 
@@ -157,10 +174,11 @@ class Profile:
 
     @classmethod
     def rhs(cls, h, b, t,
-            ri=0, n_arc=0, nx=1, ny=1,
+            ri=0, n_arc=0, nx=None, ny=None,
             element: sf.Element=sf.ElementTriP1,
             draw=False):
         """Rectangular hollow section mesh."""
+        nx,ny=validate_mesh_parameters(element=element,nx=nx,ny=ny,n_arc=n_arc)
         if n_arc>0:
             ro = ri + t
         else:
@@ -256,6 +274,17 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level):
     font_size=18,
     text_color="black",
     point_color="red",
+    render_points_as_spheres=True,
+    always_visible=True,
+    )
+    cell_centers = pts.T[:, mesh.t].mean(axis=1).T
+    labels = np.arange(mesh.t.shape[1])
+    vp.add_point_labels(
+    cell_centers,
+    labels,
+    font_size=18,
+    text_color="white",
+    point_color="blue",
     render_points_as_spheres=True,
     always_visible=True,
     )
