@@ -190,24 +190,35 @@ class Profile:
                                         ri, n_arc, nx,ny)
         inner[0, :] += t
         inner[1, :] += t
-
-        # Combine contours
-        pts = np.hstack((outer, inner))
-
-        # Build facets
         n1 = outer.shape[1]
         facets = []
         match element:
             case sf.ElementTriP1:
+                pts = np.hstack((outer, inner))
+                mesh_class=sf.MeshTri
                 for i in range(n1):
                     ipn1=i+n1
                     r1=(i + 1)%n1
                     facets.append([i, r1, ipn1])
                     facets.append([r1, r1 + n1, ipn1])
+            case sf.ElementTriP2:
+                middle=(inner+outer)/2
+                n2=2*n1
+                pts = np.hstack((outer, inner, middle))
+                mesh_class=sf.MeshTri2
+                for i in range(0,n1,2):
+                    ipn1=i+n1
+                    ipn2=i+2*n1
+                    r1=(i + 2)%n1
+                    r2=n2+(i+2)%n1
+                    facets.append([i, r1, ipn1,
+                                   i+1, ipn2+1, ipn2])
+                    facets.append([r1, r1 + n1, ipn1,
+                                   r2, ipn1+1, ipn2+1])
             case _:
-                raise TypeError(f"non supported element: {element!r}")
+                raise TypeError(f"Non-supported element: {element!r}")
         facets = np.array(facets).T
-        mesh=sf.MeshTri(pts, facets)
+        mesh=mesh_class(pts, facets)
         if not mesh.is_valid():
             vedo_plot_mesh(mesh,logging.WARNING)
             mesh.is_valid(raise_=True)
