@@ -135,6 +135,13 @@ def validate_mesh_parameters(nx=None, ny=None,
                       f" for element: {element!r} but {n} is not"))
     return nx,ny
 
+class MeshTriP2(sf.MeshTri):
+    def __init__(self, pts, t):
+        super().__init__()
+        self.doflocs = pts
+        self.elem = sf.ElementTriP2
+        self.t = t
+
 class Profile:
     """Mesh generator for RHS and U profiles."""
 
@@ -205,7 +212,7 @@ class Profile:
                 middle=(inner+outer)/2
                 n2=2*n1
                 pts = np.hstack((outer, inner, middle))
-                mesh_class=sf.MeshTri2
+                mesh_class=MeshTriP2
                 for i in range(0,n1,2):
                     ipn1=i+n1
                     ipn2=i+2*n1
@@ -252,26 +259,36 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level):
         pts, deep=False, array_type=vtk.VTK_FLOAT
     )
     vtk_pts.SetData(vtk_array)
-    ugrid = vtk.vtkUnstructuredGrid()
-    ugrid.SetPoints(vtk_pts)
+    ugrid1 = vtk.vtkUnstructuredGrid()
+    ugrid1.SetPoints(vtk_pts)
+    ugrid2 = vtk.vtkUnstructuredGrid()
+    ugrid2.SetPoints(vtk_pts)
     mapping = {
         3: vtk.VTK_TRIANGLE,
         6: vtk.VTK_QUADRATIC_TRIANGLE,
         10: vtk.VTK_LAGRANGE_TRIANGLE
     }
-    for cell in cells:
+    for i,cell in enumerate(cells):
         nverts = len(cell)
         ctype = mapping.get(nverts, vtk.VTK_POLYGON)
-        ugrid.InsertNextCell(ctype, nverts, cell.astype(np.int64))
-    vm=vedo.Mesh(ugrid)
-    f = vtk.vtkExtractEdges()
-    f.SetInputData(vm.dataset)
-    f.Update()
-    edges = vedo.Mesh(f.GetOutput())
-    edges.c("black").lw(1)
-    vm.alpha(0.2).c("cyan")
-    vp.add_actor(vm.actor)
-    vp.add_actor(edges.actor)
+        if i%2==0:
+            g=ugrid1
+        else:
+            g=ugrid2
+        g.InsertNextCell(ctype, nverts, cell.astype(np.int64))
+    vm1=vedo.Mesh(ugrid1)
+    match ctype:
+        case vtk.VTK_QUADRATIC_TRIANGLE:
+            sub = vtk.vtkAdaptiveSubdivisionFilter()
+            sub.SetInputData(vm1.dataset)
+            sub.SetMaximumEdgeLength(0.01*(np.max(pts)-np.min(pts)))
+            sub.Update()
+            vm1 = vedo.Mesh(sub.GetOutput())
+    vm1.alpha(0.2).c("cyan")
+    vp.add_actor(vm1.actor)
+    vm2=vedo.Mesh(ugrid2)
+    vm2.alpha(0.2).c("magenta")
+    vp.add_actor(vm2.actor)
     for i, p in enumerate(mesh.p.T):
         x=mesh.p[0][i]
         y=mesh.p[1][i]

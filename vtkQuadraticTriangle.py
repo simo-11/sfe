@@ -17,12 +17,23 @@ pts.InsertNextPoint(1, -0.5, 0)
 pts.InsertNextPoint(1.8, 1, 0)
 pts.InsertNextPoint(0.2, 1, 0)
 
+poly = vtk.vtkPolyData()
+poly.SetPoints(pts)
+tr = vtk.vtkTransform()
+scaler=0.01
+tr.Scale(scaler, scaler, scaler)
+tf = vtk.vtkTransformPolyDataFilter()
+tf.SetTransform(tr)
+tf.SetInputData(poly)
+tf.Update()
+tpts = tf.GetOutput().GetPoints()
+
 tri = vtk.vtkQuadraticTriangle()
 for i in range(6): tri.GetPointIds().SetId(i, i)
 
 # 3. Grid ja Mapper
 grid = vtk.vtkUnstructuredGrid()
-grid.SetPoints(pts)
+grid.SetPoints(tpts)
 grid.InsertNextCell(tri.GetCellType(), tri.GetPointIds())
 pv_mesh = pv.wrap(grid)
 smooth_mesh = pv_mesh.tessellate()
@@ -32,10 +43,12 @@ if not "mpv" in globals():
     mpv._window.setWindowTitle("VTK mesh tesselation")
 amp=mpv[0,0]
 amp.clear()
-amp.add_text('Smoothed with tessellate'
+add_wireframe=False
+amp.add_text(f'Smoothed with tessellate, scaler={scaler}'
              ,position='upper_edge'
              ,font_size=12)
-amp.add_mesh(smooth_mesh
+if add_wireframe:
+    amp.add_mesh(smooth_mesh
              ,style="wireframe"
              ,color="blue"
              ,line_width=2)
@@ -43,23 +56,11 @@ amp.add_mesh(smooth_mesh, opacity=0.3, color="cyan")
 amp.add_points(pv_mesh.points, color="red", point_size=10)
 amp=mpv[0,1]
 amp.clear()
-amp.add_mesh(pv_mesh
+if add_wireframe:
+    amp.add_mesh(pv_mesh
              ,style="wireframe"
              ,color="blue"
              ,line_width=2)
 amp.add_mesh(pv_mesh, opacity=0.3, color="cyan")
 amp.add_points(pv_mesh.points, color="red", point_size=10)
 mpv.show()
-
-"""
-actor = vtk.vtkActor()
-actor.SetMapper(mapper)
-ren = vtk.vtkRenderer()
-ren.AddActor(actor)
-win = vtk.vtkRenderWindow()
-win.AddRenderer(ren)
-iren = vtk.vtkRenderWindowInteractor()
-iren.SetRenderWindow(win)
-win.Render()
-iren.Start()
-"""
