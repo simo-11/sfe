@@ -83,4 +83,5 @@ Running file imports needed modules and defines a few functions that are describ
    * results can be compared with e.g. https://rakenteidenmekaniikka.journal.fi/article/view/163217 
 * test_circle_areas points out that the mesh defines integration limits and element type does not affect the calculation of area.
 
-## 
+## vtkQuadraticTriangle.py
+Testi of smoothing by tessellation
