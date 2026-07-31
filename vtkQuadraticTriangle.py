@@ -8,59 +8,161 @@ With help of Google Search AI
 import vtk
 import pyvistaqt
 import pyvista as pv
+from PyQt5.QtWidgets import (QCheckBox, QWidget, QVBoxLayout, QSlider,
+                             QDoubleSpinBox, QLabel, QDockWidget)
+from PyQt5.QtCore import Qt
+import numpy as np
+import datetime
 
-pts = vtk.vtkPoints()
-pts.InsertNextPoint(0, 0, 0)
-pts.InsertNextPoint(2, 0, 0)
-pts.InsertNextPoint(1, 2, 0)
-pts.InsertNextPoint(1, -0.5, 0)
-pts.InsertNextPoint(1.8, 1, 0)
-pts.InsertNextPoint(0.2, 1, 0)
-
-poly = vtk.vtkPolyData()
-poly.SetPoints(pts)
-tr = vtk.vtkTransform()
 scaler=0.01
-tr.Scale(scaler, scaler, scaler)
-tf = vtk.vtkTransformPolyDataFilter()
-tf.SetTransform(tr)
-tf.SetInputData(poly)
-tf.Update()
-tpts = tf.GetOutput().GetPoints()
-
-tri = vtk.vtkQuadraticTriangle()
-for i in range(6): tri.GetPointIds().SetId(i, i)
-
-# 3. Grid ja Mapper
-grid = vtk.vtkUnstructuredGrid()
-grid.SetPoints(tpts)
-grid.InsertNextCell(tri.GetCellType(), tri.GetPointIds())
-pv_mesh = pv.wrap(grid)
-smooth_mesh = pv_mesh.tessellate()
-
-if not "mpv" in globals():
-    mpv = pyvistaqt.MultiPlotter(nrows=1, ncols=2)
-    mpv._window.setWindowTitle("VTK mesh tesselation")
-amp=mpv[0,0]
-amp.clear()
 add_wireframe=False
-amp.add_text(f'Smoothed with tessellate, scaler={scaler}'
-             ,position='upper_edge'
-             ,font_size=12)
-if add_wireframe:
-    amp.add_mesh(smooth_mesh
-             ,style="wireframe"
-             ,color="blue"
-             ,line_width=2)
-amp.add_mesh(smooth_mesh, opacity=0.3, color="cyan")
-amp.add_points(pv_mesh.points, color="red", point_size=10)
-amp=mpv[0,1]
-amp.clear()
-if add_wireframe:
-    amp.add_mesh(pv_mesh
-             ,style="wireframe"
-             ,color="blue"
-             ,line_width=2)
-amp.add_mesh(pv_mesh, opacity=0.3, color="cyan")
-amp.add_points(pv_mesh.points, color="red", point_size=10)
-mpv.show()
+class CheckPanel(QWidget):
+    """Checkbox panel calling build_meshes and updates global add_wireframe.
+    """
+    def __init__(self):
+        super().__init__()
+        self.cb = QCheckBox("Add wireframe")
+        self.cb.setChecked(add_wireframe)
+        self.cb.stateChanged.connect(self.on_change)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.cb)
+
+    def on_change(self, state):
+        global add_wireframe
+        add_wireframe=state
+        build_meshes()
+
+class LogSlider(QWidget):
+    """Logarithmic slider 0.001–1.0 with redraw callback."""
+    def __init__(self):
+        super().__init__()
+        global scaler
+        # Slider controlling log10 value from -3 to 0
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(0, 1000)
+        logv = np.log10(scaler)
+        v = np.interp(logv, [-3, 0], [0, 1000])
+        self.slider.setValue(int(v))
+        # Spinbox showing actual value
+        self.spin = QDoubleSpinBox()
+        self.spin.setRange(0.001, 1.0)
+        self.spin.setDecimals(3)
+        self.spin.setSingleStep(0.01)
+        self.spin.setValue(scaler)
+        self.label = QLabel("Scale (0.001–1.0)")
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.label)
+        layout.addWidget(self.slider)
+        layout.addWidget(self.spin)
+        self.slider.sliderReleased.connect(self._on_release)
+        self.slider.valueChanged.connect(self._from_slider)
+        self.spin.valueChanged.connect(self._from_spin)
+
+    def _from_slider(self, v):
+        """Update spinbox from slider."""
+        global scaler
+        log_val = np.interp(v, [0, 1000], [-3, 0])
+        x = 10 ** log_val
+        self.spin.blockSignals(True)
+        self.spin.setValue(x)
+        self.spin.blockSignals(False)
+        scaler=x
+
+    def _on_release(self):
+        build_meshes()
+
+    def _from_spin(self, x):
+        """Update slider from spinbox."""
+        global scaler
+        scaler=x
+        log_val = np.log10(x)
+        v = np.interp(log_val, [-3, 0], [0, 1000])
+        self.slider.blockSignals(True)
+        self.slider.setValue(int(v))
+        self.slider.blockSignals(False)
+        build_meshes()
+
+def build_meshes():
+    global mpv,dock,scaler,add_wireframe
+    pts = vtk.vtkPoints()
+    pts.InsertNextPoint(0, 0, 0)
+    pts.InsertNextPoint(2, 0, 0)
+    pts.InsertNextPoint(1, 2, 0)
+    pts.InsertNextPoint(1, -0.5, 0)
+    pts.InsertNextPoint(1.8, 1, 0)
+    pts.InsertNextPoint(0.2, 1, 0)
+
+    poly = vtk.vtkPolyData()
+    poly.SetPoints(pts)
+    tr = vtk.vtkTransform()
+    tr.Scale(scaler, scaler, scaler)
+    tf = vtk.vtkTransformPolyDataFilter()
+    tf.SetTransform(tr)
+    tf.SetInputData(poly)
+    tf.Update()
+    tpts = tf.GetOutput().GetPoints()
+
+    tri = vtk.vtkQuadraticTriangle()
+    for i in range(6): tri.GetPointIds().SetId(i, i)
+
+    # 3. Grid ja Mapper
+    grid = vtk.vtkUnstructuredGrid()
+    grid.SetPoints(tpts)
+    grid.InsertNextCell(tri.GetCellType(), tri.GetPointIds())
+    pv_mesh = pv.wrap(grid)
+    smooth_mesh = pv_mesh.tessellate(max_n_subdivide=10)
+
+    if not "mpv" in globals():
+        mpv = pyvistaqt.MultiPlotter(nrows=1, ncols=2)
+        mpv._window.setWindowTitle("VTK mesh tessellation")
+        mpv.show()
+    amp=mpv[0,0]
+    amp.clear()
+    amp.add_text('Smoothed with tessellate'
+                 ,position='upper_edge'
+                 ,font_size=12)
+    if add_wireframe:
+        amp.add_mesh(smooth_mesh
+                 ,style="wireframe"
+                 ,color="blue"
+                 ,line_width=2)
+    amp.add_mesh(smooth_mesh, opacity=0.3, color="cyan")
+    amp.add_points(pv_mesh.points, color="red", point_size=10)
+    amp=mpv[0,1]
+    amp.clear()
+    if add_wireframe:
+        amp.add_mesh(pv_mesh
+                 ,style="wireframe"
+                 ,color="blue"
+                 ,line_width=2)
+    amp.add_mesh(pv_mesh, opacity=0.3, color="cyan")
+    amp.add_points(pv_mesh.points, color="red", point_size=10)
+    now=datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    amp.app_window.statusBar().showMessage(
+    f"""scaler={scaler:.3f} {now}""")
+    if not "dock" in globals():
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        widget = LogSlider()
+        cb = CheckPanel()
+        layout.addWidget(widget)
+        layout.addWidget(cb)
+        layout.addStretch(1)
+        aw=mpv[0,0].app_window
+        dock = QDockWidget("Options", aw)
+        dock.setFeatures(QDockWidget.DockWidgetClosable)
+        dock.setMinimumSize(dock.minimumSizeHint())
+        def on_dock_visibility(visible):
+            global dock
+            if not visible:
+                if "dock" in globals():
+                    del(dock)
+        dock.visibilityChanged.connect(on_dock_visibility)
+        dock.setWidget(container)
+        aw.addDockWidget(Qt.RightDockWidgetArea, dock)
+
+#%% run
+if "dock" in globals():
+    dock.close()
+    del(dock)
+build_meshes()
