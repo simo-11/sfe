@@ -84,4 +84,4 @@ Running file imports needed modules and defines a few functions that are describ
 * test_circle_areas points out that the mesh defines integration limits and element type does not affect the calculation of area.
 
 ## vtkQuadraticTriangle.py
-Testi of smoothing by tessellation
+Testi of smoothing by tessellation. For tessellation to be effective element size should be >1. This can probably be tuned.
