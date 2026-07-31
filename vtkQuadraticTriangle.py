@@ -13,8 +13,11 @@ from PyQt5.QtWidgets import (QCheckBox, QWidget, QVBoxLayout, QSlider,
 from PyQt5.QtCore import Qt
 import numpy as np
 import datetime
+import math
+import sys
 
 scaler=0.01
+chord_error=0.001
 add_wireframe=False
 class CheckPanel(QWidget):
     """Checkbox panel calling build_meshes and updates global add_wireframe.
@@ -33,23 +36,25 @@ class CheckPanel(QWidget):
         build_meshes()
 
 class LogSlider(QWidget):
-    """Logarithmic slider 0.001–1.0 with redraw callback."""
-    def __init__(self):
+    """Logarithmic slider with redraw callback."""
+    def __init__(self,var_name,min_value=0.001):
         super().__init__()
-        global scaler
-        # Slider controlling log10 value from -3 to 0
+        self.var_name=var_name
+        self.min_value=min_value
+        self.log10_value=math.log10(min_value)
+        # Slider controlling log10 value
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, 1000)
-        logv = np.log10(scaler)
-        v = np.interp(logv, [-3, 0], [0, 1000])
+        logv = np.log10(globals()[var_name])
+        v = np.interp(logv, [self.log10_value, 0], [0, 1000])
         self.slider.setValue(int(v))
         # Spinbox showing actual value
         self.spin = QDoubleSpinBox()
-        self.spin.setRange(0.001, 1.0)
-        self.spin.setDecimals(3)
-        self.spin.setSingleStep(0.01)
-        self.spin.setValue(scaler)
-        self.label = QLabel("Scale (0.001–1.0)")
+        self.spin.setRange(min_value, 1.0)
+        self.spin.setDecimals(int(self.log10_value))
+        self.spin.setSingleStep(10*min_value)
+        self.spin.setValue(globals()[var_name])
+        self.label = QLabel(f"{var_name} ({min_value}–1.0)")
         layout = QVBoxLayout(self)
         layout.addWidget(self.label)
         layout.addWidget(self.slider)
@@ -60,23 +65,22 @@ class LogSlider(QWidget):
 
     def _from_slider(self, v):
         """Update spinbox from slider."""
-        global scaler
-        log_val = np.interp(v, [0, 1000], [-3, 0])
+        log_val = np.interp(v, [0, 1000], [self.log10_value, 0])
         x = 10 ** log_val
         self.spin.blockSignals(True)
         self.spin.setValue(x)
         self.spin.blockSignals(False)
-        scaler=x
+        globals()[self.var_name]=x
 
     def _on_release(self):
         build_meshes()
 
     def _from_spin(self, x):
         """Update slider from spinbox."""
-        global scaler
-        scaler=x
+        mod = sys.modules[__name__]
+        setattr(mod, self.var_name,x)
         log_val = np.log10(x)
-        v = np.interp(log_val, [-3, 0], [0, 1000])
+        v = np.interp(log_val, [self.log10_value, 0], [0, 1000])
         self.slider.blockSignals(True)
         self.slider.setValue(int(v))
         self.slider.blockSignals(False)
@@ -110,7 +114,12 @@ def build_meshes():
     grid.SetPoints(tpts)
     grid.InsertNextCell(tri.GetCellType(), tri.GetPointIds())
     pv_mesh = pv.wrap(grid)
-    smooth_mesh = pv_mesh.tessellate(max_n_subdivide=10)
+    tess = vtk.vtkTessellatorFilter()
+    tess.SetInputData(pv_mesh)
+    tess.SetChordError(chord_error)
+    tess.SetMaximumNumberOfSubdivisions(6)
+    tess.Update()
+    smooth_mesh = pv.wrap(tess.GetOutput())
 
     if not "mpv" in globals():
         mpv = pyvistaqt.MultiPlotter(nrows=1, ncols=2)
@@ -139,14 +148,13 @@ def build_meshes():
     amp.add_points(pv_mesh.points, color="red", point_size=10)
     now=datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     amp.app_window.statusBar().showMessage(
-    f"""scaler={scaler:.3f} {now}""")
+    f"""scaler={scaler:.3f}, chord_error={chord_error:.5G} {now}""")
     if not "dock" in globals():
         container = QWidget()
         layout = QVBoxLayout(container)
-        widget = LogSlider()
-        cb = CheckPanel()
-        layout.addWidget(widget)
-        layout.addWidget(cb)
+        layout.addWidget(LogSlider('scaler'))
+        layout.addWidget(LogSlider('chord_error',0.001*scaler))
+        layout.addWidget(CheckPanel())
         layout.addStretch(1)
         aw=mpv[0,0].app_window
         dock = QDockWidget("Options", aw)
@@ -164,5 +172,4 @@ def build_meshes():
 #%% run
 if "dock" in globals():
     dock.close()
-    del(dock)
 build_meshes()
