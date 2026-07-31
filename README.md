@@ -49,6 +49,7 @@ Dependencies can be installed using pip
  * gmsh - geometry and mesh definitions
  * pyvistaqt pyqt5 - requires pyvista and qtpy
  * vedo visualization using vtk
+ * tqdm - is a Python library that provides a fast, extensible progress bar for loops and other iterable objects
  * mpi4py - message passing library for petsc which does not work with windows
  * petsc4py slepc4py - python interfaces for petsc
  ** does not work 
@@ -57,7 +58,7 @@ Dependencies can be installed using pip
 
 Typical command needed after update of python is (uv in front if it is used)
 ```
-uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh vedo
+uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh vedo tqdm
 ```
 
 # Getting  examples
