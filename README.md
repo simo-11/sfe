@@ -84,4 +84,9 @@ Running file imports needed modules and defines a few functions that are describ
 * test_circle_areas points out that the mesh defines integration limits and element type does not affect the calculation of area.
 
 ## vtkQuadraticTriangle.py
-Testi of smoothing by tessellation. For tessellation to be effective element size should be >1. This can probably be tuned.
+Test of smoothing by tessellation. For pyvista.tessellation i.e.
+method tessellate in module pyvista.core.filters.data_set to be effective element size should be >1. 
+Parameters can be tuned by using vtk.vtkTessellatorFilter and effect of parameters can be seen using vtkQuadraticTriangle.py.
+max_n_subdivide/MaximumNumberOfSubdivisions can be se also in pyvista interface and default value is 3.
+Default for ChordError is 0.001 which is not suitable for dense meshes using SI(metric) units.
+Suitable value is about 0.001 times smallest arc i.e. 1e-6 if roundings of about 1 mm (0.001 m) are used.
