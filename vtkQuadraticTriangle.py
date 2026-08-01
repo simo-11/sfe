@@ -16,9 +16,11 @@ import datetime
 import math
 import sys
 
-scaler=0.01
+scaler=1
 chord_error=0.001
-add_wireframe=False
+tess_subdivisions=4
+add_wireframe=True
+
 class CheckPanel(QWidget):
     """Checkbox panel calling build_meshes and updates global add_wireframe.
     """
@@ -51,10 +53,12 @@ class LogSlider(QWidget):
         # Spinbox showing actual value
         self.spin = QDoubleSpinBox()
         self.spin.setRange(min_value, 1.0)
-        self.spin.setDecimals(int(self.log10_value))
+        decimals=int(abs(self.log10_value))
+        self.spin.setDecimals(decimals)
         self.spin.setSingleStep(10*min_value)
         self.spin.setValue(globals()[var_name])
-        self.label = QLabel(f"{var_name} ({min_value}–1.0)")
+        fmt=f".{decimals}f"
+        self.label = QLabel(f"{var_name} ({min_value:{fmt}}–1.0)")
         layout = QVBoxLayout(self)
         layout.addWidget(self.label)
         layout.addWidget(self.slider)
@@ -117,7 +121,7 @@ def build_meshes():
     tess = vtk.vtkTessellatorFilter()
     tess.SetInputData(pv_mesh)
     tess.SetChordError(chord_error)
-    tess.SetMaximumNumberOfSubdivisions(6)
+    tess.SetMaximumNumberOfSubdivisions(tess_subdivisions)
     tess.Update()
     smooth_mesh = pv.wrap(tess.GetOutput())
 
@@ -148,12 +152,27 @@ def build_meshes():
     amp.add_points(pv_mesh.points, color="red", point_size=10)
     now=datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     amp.app_window.statusBar().showMessage(
-    f"""scaler={scaler:.3f}, chord_error={chord_error:.5G} {now}""")
+    f"""scaler={scaler:.3f}, chord_error={chord_error:.5G}
+   tess_subdivisions={tess_subdivisions}
+ {now}""")
     if not "dock" in globals():
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.addWidget(LogSlider('scaler'))
         layout.addWidget(LogSlider('chord_error',0.001*scaler))
+        subdiv_label=QLabel(f'max subdivisions {tess_subdivisions}');
+        layout.addWidget(subdiv_label)
+        def update_tess_subdivisions(v):
+            global tess_subdivisions
+            tess_subdivisions=v
+            subdiv_label.setText(f'max subdivisions {v}')
+            build_meshes()
+        slider = QSlider(Qt.Horizontal)
+        slider.setMinimum(0)
+        slider.setMaximum(6)
+        slider.setValue(tess_subdivisions)
+        slider.valueChanged.connect(update_tess_subdivisions)
+        layout.addWidget(slider)
         layout.addWidget(CheckPanel())
         layout.addStretch(1)
         aw=mpv[0,0].app_window
