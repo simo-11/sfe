@@ -212,7 +212,7 @@ class Profile:
                 middle=(inner+outer)/2
                 n2=2*n1
                 pts = np.hstack((outer, inner, middle))
-                mesh_class=MeshTriP2
+                mesh_class=sf.MeshTriP2
                 for i in range(0,n1,2):
                     ipn1=i+n1
                     ipn2=i+2*n1
