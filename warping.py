@@ -184,7 +184,13 @@ class Profile:
             ri=0, n_arc=0, nx=None, ny=None,
             element: sf.Element=sf.ElementTriP1,
             draw=False):
-        """Rectangular hollow section mesh."""
+        """Rectangular hollow section mesh.
+        Using higher order elements is under study.
+        Creating mesh with higher order nodes is still fuzzy.
+        Mesh.__post_init has code that is for importing
+        Check if Mesh.from_mesh () and
+        Mesh.morphed could be used on
+        """
         nx,ny=validate_mesh_parameters(element=element,nx=nx,ny=ny,n_arc=n_arc)
         if n_arc>0:
             ro = ri + t
