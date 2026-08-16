@@ -23,9 +23,9 @@ PS C:\> winget install -e --id astral-sh.uv
 
 ## Python
 ```
-C:\> uv python install 3.14.6
-github\scikit-fem [main ≡]> uv venv --clear --python 3.14.6
-Using CPython 3.14.6  
+C:\> uv python install 3.14.7
+github\scikit-fem [main ≡]> uv venv --clear --python 3.14.7
+Using CPython 3.14.7  
 Creating virtual environment at: .venv
 Activate with: .venv\Scripts\activate
 github\scikit-fem [main ≡]> .venv\Scripts\activate
