@@ -72,9 +72,13 @@ def reset_logging():
 
 reset_logging()
 
-debug_logger_names=["sfe"
-    #,"skfem"
-    ]
+levels = {
+    "DEBUG": ["sfe"],
+    "INFO": [],
+    "WARNING": ["skfem.assembly.basis",
+                "skfem.assembly.form.form"
+            ]
+}
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -104,12 +108,15 @@ LOGGING = {
     },
 
     "loggers": {
-        name: {
-            "level": "DEBUG",
-            "handlers": ["console", "file"],
-            "propagate": False,
+        **{
+            name: {
+                "level": level,
+                "handlers": ["console", "file"],
+                "propagate": False,
+            }
+            for level, names in levels.items()
+            for name in names
         }
-        for name in debug_logger_names
     },
 
     "root": {
@@ -188,7 +195,7 @@ class Profile:
         Using higher order elements is under study.
         Creating mesh with higher order nodes is still fuzzy.
         Mesh.__post_init has code that is for importing
-        Check if Mesh.from_mesh () and
+        Check if Mesh.from_mesh() and
         Mesh.morphed could be used on
         """
         nx,ny=validate_mesh_parameters(element=element,nx=nx,ny=ny,n_arc=n_arc)
@@ -1423,20 +1430,26 @@ def test_circle_areas():
         types.SimpleNamespace(elem=sf.ElementTriP3()),
          ]
     start_mp(nrows=len(ucs),ncols=2)
+    write_json=False
     mp_global = globals().get("mp")
     exact=np.pi
     print(f"Exact: {exact:.6g}")
     for row,uc in enumerate(ucs):
         uc.vtk_tessellate=0
         for col in range(0,2):
+            mapping=None
             for nrefs in range(1):
                 match col:
                     case 0:
                         mesh=sf.MeshTri1.init_circle(nrefs)
                     case 1:
                         mesh=sf.MeshTri2.init_circle(nrefs)
-                uc.basis = sf.Basis(mesh,uc.elem)
-                sf_mesh_to_json(uc)
+                        if uc.elem.maxdeg>2:
+                            mapping=sf.MappingIsoparametric(
+                                mesh=mesh,elem=uc.elem)
+                uc.basis = sf.Basis(mesh,uc.elem,mapping=mapping)
+                if write_json:
+                    sf_mesh_to_json(uc)
                 area=i_area.assemble(uc.basis)
                 uc.mp=mp_global[row,col]
                 if hasattr(uc,'name'):
