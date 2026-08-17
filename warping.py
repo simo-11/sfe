@@ -38,6 +38,7 @@ For a ready and tested solution for section properties
 see https://sectionproperties.readthedocs.io/
 """
 import json
+import dataclasses
 import copy
 import numpy as np
 import skfem as sf
@@ -47,6 +48,7 @@ import matplotlib.pyplot as pyplot
 import math
 import enum
 import types
+import typing
 import logging
 import pyvista as pv
 import pyvistaqt
@@ -142,12 +144,20 @@ def validate_mesh_parameters(nx=None, ny=None,
                       f" for element: {element!r} but {n} is not"))
     return nx,ny
 
-class MeshTriP2(sf.MeshTri):
-    def __init__(self, pts, t):
-        super().__init__()
-        self.doflocs = pts
-        self.elem = sf.ElementTriP2
-        self.t = t
+@dataclasses.dataclass(repr=False)
+class MeshTri3(sf.MeshTri2):
+    elem: typing.Type[sf.Element] = sf.ElementTriP3
+    @classmethod
+    def init_circle(cls: typing.Type,
+                    nrefs: int = 3,
+                    smoothed: bool = False) -> 'MeshTri3':
+        m = sf.MeshTri1.init_circle(nrefs=nrefs, smoothed=smoothed)
+        M = cls.from_mesh(m)
+        D = M.dofs.get_facet_dofs(M.boundary_facets()).flatten()
+        doflocs = M.doflocs.copy()
+        doflocs[:, D] /= np.linalg.norm(doflocs[:, D], axis=0)
+        return dataclasses.replace(M, doflocs=doflocs)
+
 
 class Profile:
     """Mesh generator for RHS and U profiles."""
@@ -1443,11 +1453,16 @@ def test_circle_areas():
                     case 0:
                         mesh=sf.MeshTri1.init_circle(nrefs)
                     case 1:
-                        mesh=sf.MeshTri2.init_circle(nrefs)
-                        if uc.elem.maxdeg>2:
+                        match uc.elem.maxdeg:
+                            case 2:
+                                mesh=sf.MeshTri2.init_circle(nrefs)
+                            case 3:
+                                mesh=MeshTri3.init_circle(nrefs)
+                uc.basis = sf.Basis(mesh,uc.elem,mapping=mapping)
+                """
                             mapping=sf.MappingIsoparametric(
                                 mesh=mesh,elem=uc.elem)
-                uc.basis = sf.Basis(mesh,uc.elem,mapping=mapping)
+                """
                 if write_json:
                     sf_mesh_to_json(uc)
                 area=i_area.assemble(uc.basis)
