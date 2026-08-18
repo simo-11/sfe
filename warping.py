@@ -1470,9 +1470,9 @@ def test_circle_areas():
                 if hasattr(uc,'name'):
                     del uc.name
                 qtplot(uc)
-                epc=100*(exact-area)/exact
+                epc=100*(area-exact)/exact
                 print((f"{uc.name}, nrefs={nrefs}:area={area:7.6g},"
-                       f" error={epc:5.4g} %"))
+                       f" error={epc: 5.4g} %"))
     return ucs
 """
 qcs=test_circle_areas()
