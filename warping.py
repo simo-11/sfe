@@ -75,8 +75,8 @@ def reset_logging():
 reset_logging()
 
 levels = {
-    "DEBUG": ["sfe"],
-    "INFO": [],
+    "DEBUG": [],#"sfe"],
+    "INFO": ["sfe"],
     "WARNING": ["skfem.assembly.basis",
                 "skfem.assembly.form.form"
             ]
@@ -130,20 +130,6 @@ logging.config.dictConfig(LOGGING)
 logger = logging.getLogger("sfe")
 logger.info("Starting")
 
-def validate_mesh_parameters(nx=None, ny=None,
-    element: sf.Element=sf.ElementTriP1,n_arc=0) ->(int,int):
-    maxdeg=element.maxdeg
-    if nx==None:
-        nx=maxdeg
-    if ny==None:
-        ny=maxdeg
-    for n in [nx,ny,n_arc]:
-        if not (n%maxdeg)==0:
-            raise ValueError((f"nx({nx}), ny({ny}) and n_arc({n_arc}) "
-                      f"must be divisible by {maxdeg}"
-                      f" for element: {element!r} but {n} is not"))
-    return nx,ny
-
 @dataclasses.dataclass(repr=False)
 class MeshTri3(sf.MeshTri2):
     elem: typing.Type[sf.Element] = sf.ElementTriP3
@@ -158,6 +144,10 @@ class MeshTri3(sf.MeshTri2):
         doflocs[:, D] /= np.linalg.norm(doflocs[:, D], axis=0)
         return dataclasses.replace(M, doflocs=doflocs)
 
+def check_mesh(mesh: sf.Mesh):
+    if not mesh.is_valid():
+        vedo_plot_mesh(mesh,logging.WARNING)
+        mesh.is_valid(raise_=True)
 
 class Profile:
     """Mesh generator for RHS and U profiles."""
@@ -198,7 +188,7 @@ class Profile:
 
     @classmethod
     def rhs(cls, h, b, t,
-            ri=0, n_arc=0, nx=None, ny=None,
+            ri=0, n_arc=0, nx=1, ny=1,
             element: sf.Element=sf.ElementTriP1,
             draw=False):
         """Rectangular hollow section mesh.
@@ -208,7 +198,6 @@ class Profile:
         Check if Mesh.from_mesh() and
         Mesh.morphed could be used on
         """
-        nx,ny=validate_mesh_parameters(element=element,nx=nx,ny=ny,n_arc=n_arc)
         if n_arc>0:
             ro = ri + t
         else:
@@ -232,10 +221,26 @@ class Profile:
                     facets.append([i, r1, ipn1])
                     facets.append([r1, r1 + n1, ipn1])
             case sf.ElementTriP2:
+                pts = np.hstack((outer, inner))
+                mesh_class=sf.MeshTri2
+                for i in range(n1):
+                    ipn1=i+n1
+                    r1=(i + 1)%n1
+                    facets.append([i, r1, ipn1])
+                    facets.append([r1, r1 + n1, ipn1])
+            case sf.ElementTriP3:
+                pts = np.hstack((outer, inner))
+                mesh_class=MeshTri3
+                for i in range(n1):
+                    ipn1=i+n1
+                    r1=(i + 1)%n1
+                    facets.append([i, r1, ipn1])
+                    facets.append([r1, r1 + n1, ipn1])
+            case sf.ElementTriP8:
                 middle=(inner+outer)/2
                 n2=2*n1
                 pts = np.hstack((outer, inner, middle))
-                mesh_class=sf.MeshTriP2
+                mesh_class=sf.MeshTri2
                 for i in range(0,n1,2):
                     ipn1=i+n1
                     ipn2=i+2*n1
@@ -248,10 +253,15 @@ class Profile:
             case _:
                 raise TypeError(f"Non-supported element: {element!r}")
         facets = np.array(facets).T
-        mesh=mesh_class(pts, facets)
-        if not mesh.is_valid():
-            vedo_plot_mesh(mesh,logging.WARNING)
-            mesh.is_valid(raise_=True)
+        #mesh=mesh_class(pts, facets)
+        mesh=sf.MeshTri(pts,facets)
+        check_mesh(mesh)
+        match mesh_class:
+            case sf.MeshTri:
+                pass
+            case _:
+                mesh=mesh_class.from_mesh(mesh)
+        check_mesh(mesh)
         uc=types.SimpleNamespace(elem=element())
         uc.profile=f'RHS {h}x{b}x{t} ri={ri} n_arc={n_arc} nx={nx} ny={ny}'
         uc.model=Model.RHS
