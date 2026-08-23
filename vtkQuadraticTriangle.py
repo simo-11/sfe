@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sat Apr  4 12:29:19 2026
-With help of Google Search AI
+
+Demonstrates effect of vtk tesselation parameters.
+
 @author: simon
 """
 

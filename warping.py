@@ -151,7 +151,7 @@ class MeshTri3(sf.MeshTri2):
     def init_circle(cls: typing.Type,
                     nrefs: int = 3,
                     smoothed: bool = False) -> 'MeshTri3':
-        m = sf.MeshTri1.init_circle(nrefs=nrefs, smoothed=smoothed)
+        m = sf.MeshTri2.init_circle(nrefs=nrefs, smoothed=smoothed)
         M = cls.from_mesh(m)
         D = M.dofs.get_facet_dofs(M.boundary_facets()).flatten()
         doflocs = M.doflocs.copy()
@@ -635,6 +635,33 @@ def gmsh_to_meshio():
         cell_data={"gmsh:physical": phys_data}
     )
 
+def min_cell_length(grid: pv.UnstructuredGrid) -> float:
+    """Return smallest edge length in the mesh."""
+    pts = grid.points
+    min_len = np.inf
+    for cell in grid.cells:
+        # cell is an array of point indices
+        cpts = pts[cell]
+        n = len(cpts)
+        for i in range(n):
+            p0 = cpts[i]
+            p1 = cpts[(i + 1) % n]
+            d = np.linalg.norm(p1 - p0)
+            if d < min_len:
+                min_len = d
+    return float(min_len)
+
+def tessellate(pv_mesh,max_n_subdivide=3, chord_error=None):
+    if chord_error==None:
+        chord_error=0.01*min_cell_length(pv_mesh)
+    tess = vtk.vtkTessellatorFilter()
+    tess.SetInputData(pv_mesh)
+    tess.SetChordError(chord_error)
+    tess.SetMaximumNumberOfSubdivisions(max_n_subdivide)
+    tess.Update()
+    smooth_mesh = pv.wrap(tess.GetOutput())
+    return smooth_mesh
+
 def finalize_mesh(uc):
     # Mesh Configuration
     if isinstance(uc.elem.refdom,sf.refdom.RefQuad):
@@ -653,7 +680,7 @@ def finalize_mesh(uc):
                       f'{uc.model} using {uc.name}')
                       ,font_size=12)
         pv_mesh = gmsh_to_pyvista()
-        smooth_mesh = pv_mesh.tessellate(max_n_subdivide=2)
+        smooth_mesh = tessellate(pv_mesh)
         amp.add_mesh(smooth_mesh
                      ,scalars="Gmsh_gamma", clim=[0, 1], cmap="RdYlGn"
                      ,show_edges=True
@@ -939,7 +966,7 @@ def mplot(mesh: sf.mesh.Mesh, **fields):
     plotter.show()
     return pv_mesh
 
-def qtplot(uc,scale=None, **kwargs):
+def qtplot(uc,scale=None, show_edges=False, **kwargs):
     fill_uc_defaults(uc)
     if not hasattr(uc, 'mp'):
         start_mp(ncols=1)
@@ -974,14 +1001,19 @@ def qtplot(uc,scale=None, **kwargs):
     except AttributeError as e:
         logger.debug(f"First run {e}")
     if uc.vtk_tessellate>0:
-        smooth_mesh = mesh.tessellate(max_n_subdivide=uc.vtk_tessellate)
+        smooth_mesh = tessellate(mesh,uc.vtk_tessellate)
+        if show_edges==None:
+            show_edges=False
     else:
         smooth_mesh=mesh
+        if show_edges==None:
+            show_edges=True
     if just_mesh:
         points = np.column_stack((coords.T, sz))
         uc.mp.add_mesh(smooth_mesh,
                        scalars=None,
-                       show_edges=True)
+                       show_scalar_bar=False,
+                       show_edges=show_edges)
         uc.mp.add_text(f"""{uc.name} {mesh.n_points} points""",
                        font_size=12)
         uc.mp.add_points(points,
@@ -995,7 +1027,7 @@ def qtplot(uc,scale=None, **kwargs):
                        clim=[-limit, limit],
                        scalars="warping",
                        scalar_bar_args={"title": f"{p_title} for {uc.name}"},
-                       show_edges=True)
+                       show_edges=show_edges)
         uc.mp.show_bounds(
             grid='back',
             location='outer',
@@ -1196,7 +1228,7 @@ def fill_uc_defaults(uc):
     if not hasattr(uc,'mesh_scale'):
         uc.mesh_scale=1
     if not hasattr(uc,'vtk_tessellate'):
-        uc.vtk_tessellate=2
+        uc.vtk_tessellate=4
     if not hasattr(uc,'units'):
         match uc.mesh_scale:
             case 1:
@@ -1434,45 +1466,33 @@ Note that element type does not have affect on calculation of area
 def i_area(w):
     return 1
 def test_circle_areas():
-    ucs=[
-        types.SimpleNamespace(elem=sf.ElementTriP1()),
-        types.SimpleNamespace(elem=sf.ElementTriP2()),
-        types.SimpleNamespace(elem=sf.ElementTriP3()),
-         ]
+    elem_classes = [sf.ElementTriP1,sf.ElementTriP2,sf.ElementTriP3]
+    mesh_classes = [sf.MeshTri2,MeshTri3]
+    ucs=[[types.SimpleNamespace() for _ in range(len(mesh_classes))]
+         for _ in range(len(elem_classes))]
     start_mp(nrows=len(ucs),ncols=2)
     write_json=False
     mp_global = globals().get("mp")
     exact=np.pi
     print(f"Exact: {exact:.6g}")
-    for row,uc in enumerate(ucs):
-        uc.vtk_tessellate=0
-        for col in range(0,2):
+    for row, row_items in enumerate(ucs):
+        for col, uc in enumerate(row_items):
+            uc.vtk_tessellate=4
             mapping=None
-            for nrefs in range(1):
-                match col:
-                    case 0:
-                        mesh=sf.MeshTri1.init_circle(nrefs)
-                    case 1:
-                        match uc.elem.maxdeg:
-                            case 2:
-                                mesh=sf.MeshTri2.init_circle(nrefs)
-                            case 3:
-                                mesh=MeshTri3.init_circle(nrefs)
-                uc.basis = sf.Basis(mesh,uc.elem,mapping=mapping)
-                """
-                            mapping=sf.MappingIsoparametric(
-                                mesh=mesh,elem=uc.elem)
-                """
-                if write_json:
-                    sf_mesh_to_json(uc)
-                area=i_area.assemble(uc.basis)
-                uc.mp=mp_global[row,col]
-                if hasattr(uc,'name'):
-                    del uc.name
-                qtplot(uc)
-                epc=100*(area-exact)/exact
-                print((f"{uc.name}, nrefs={nrefs}:area={area:7.6g},"
-                       f" error={epc: 5.4g} %"))
+            nrefs=0
+            uc.elem=elem_classes[row]()
+            mesh=mesh_classes[col].init_circle(nrefs)
+            uc.basis = sf.Basis(mesh,uc.elem,mapping=mapping)
+            if write_json:
+                sf_mesh_to_json(uc)
+            area=i_area.assemble(uc.basis)
+            uc.mp=mp_global[row,col]
+            if hasattr(uc,'name'):
+                del uc.name
+            qtplot(uc)
+            epc=100*(area-exact)/exact
+            print((f"{uc.name}, nrefs={nrefs}:area={area:7.6g},"
+                   f" error={epc: 5.4g} %"))
     return ucs
 """
 qcs=test_circle_areas()
