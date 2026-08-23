@@ -1467,10 +1467,10 @@ def i_area(w):
     return 1
 def test_circle_areas():
     elem_classes = [sf.ElementTriP1,sf.ElementTriP2,sf.ElementTriP3]
-    mesh_classes = [sf.MeshTri2,MeshTri3]
+    mesh_classes = [sf.MeshTri,sf.MeshTri2,MeshTri3]
     ucs=[[types.SimpleNamespace() for _ in range(len(mesh_classes))]
          for _ in range(len(elem_classes))]
-    start_mp(nrows=len(ucs),ncols=2)
+    start_mp(nrows=len(elem_classes),ncols=len(mesh_classes))
     write_json=False
     mp_global = globals().get("mp")
     exact=np.pi
@@ -1479,7 +1479,13 @@ def test_circle_areas():
         for col, uc in enumerate(row_items):
             uc.vtk_tessellate=4
             mapping=None
-            nrefs=0
+            match row:
+                case 0:
+                    nrefs=2-col
+                case 1:
+                    nrefs=max(1-col,0)
+                case _:
+                    nrefs=0
             uc.elem=elem_classes[row]()
             mesh=mesh_classes[col].init_circle(nrefs)
             uc.basis = sf.Basis(mesh,uc.elem,mapping=mapping)
@@ -1491,7 +1497,8 @@ def test_circle_areas():
                 del uc.name
             qtplot(uc)
             epc=100*(area-exact)/exact
-            print((f"{uc.name}, nrefs={nrefs}:area={area:7.6g},"
+            print((f"{uc.name}, nrefs={nrefs}, nnodes={uc.basis.N:2d}:"
+                   f" area={area:7.6g},"
                    f" error={epc: 5.4g} %"))
     return ucs
 """
