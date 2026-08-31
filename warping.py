@@ -158,6 +158,8 @@ class Profile:
         th = np.linspace(a0, a1, n, endpoint=False)
         x = cx + r * np.cos(th)
         y = cy + r * np.sin(th)
+        x = np.round(x, 14)
+        y = np.round(y, 14)
         return np.vstack((x, y))
 
     @staticmethod
@@ -929,16 +931,25 @@ def tsplot(uc):
 
 def start_mp(nrows=1, ncols=2,**kwargs):
     global mp
+    start_mp=False
     params = dict(nrows=nrows, ncols=ncols)
     params.update(kwargs)
     if not "mp" in globals():
-        mp = pyvistaqt.MultiPlotter(**params)
-    if (mp._nrows != nrows
+        start_mp=True
+    elif (mp._nrows != nrows
         or mp._ncols != ncols
         or not hasattr(mp[0,0].renderer,'actors')
         ):
         mp.close()
+        start_mp=True
+    if start_mp:
         mp = pyvistaqt.MultiPlotter(**params)
+        for i in range(nrows):
+            for j in range(ncols):
+                item=mp[i,j]
+                item.view_xy()
+                item.camera.up = (0, 0, 1)
+                item.reset_camera()
     return mp
 
 def start_vp():
@@ -1073,6 +1084,10 @@ scale={scale:.4G}, max warping={max_disp:.4G}
             show_message=False,   # Press R to toggle selection tool
             style='wireframe'     # highlight picked cell
             )
+    uc.mp.view_xy()
+    uc.mp.camera.elevation = 180
+    uc.mp.camera.up = (0, 1, 0)
+    uc.mp.reset_camera()
     uc.mp.render()
     return (scale)
 
@@ -1407,14 +1422,16 @@ do_sp=True
 do_list_entities=False
 gmsh_plot=True
 #%% test_elements
+"""
 ucs=test_elements()
+"""
 #%% test profile.rhs
+"""
 rhs0 = Profile.rhs(b=0.15, h=0.15, t=0.008, ri=0.008,n_arc=4, draw=True)
+"""
 #%% test u
-#%% test circle
-# qtplot(ccs[0])
-# qtplot(ccs[1])
-def test_circle():
+#%% test init circle
+def test_init_circle():
     ucs=[#types.SimpleNamespace(elem=sf.ElementTriP2()),
          types.SimpleNamespace(elem=sf.ElementTriP3())
          ]
@@ -1435,6 +1452,7 @@ def test_circle():
         uc.basis = sf.Basis(sf.MeshTri2.init_circle(row),
                         uc.elem)
         uc.mp=mp_global[row,0]
+        uc.profile='Unit circle'
         qtplot(uc)
         sp(uc)
         uc.mp=mp_global[row,1]
@@ -1442,7 +1460,58 @@ def test_circle():
         report_sp(uc)
     return ucs
 """
-ccs=test_circle()
+ccs=test_init_circle()
+qtplot(ccs[0])
+qtplot(ccs[1])
+"""
+#%% manual circle
+def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None):
+    match type(elem):
+        case sf.ElementTriP1:
+            if n_elem==None:
+                n_elem=4*6
+            doflocs=np.zeros((2,1+n_elem))
+            doflocs[:,1:]=Profile.arc(0,0,1,0,2*np.pi,n_elem)
+            t=np.zeros((3,n_elem),dtype=np.int32)
+            t[1,:]=np.arange(1,n_elem+1)
+            t[2,:]=np.concat([np.arange(2,n_elem+1),np.arange(1,2)])
+        case sf.ElementTriP2:
+            doflocs=np.zeros((1+4+8,2))
+        case sf.ElementTriP3:
+            doflocs=np.zeros((1+4+4+4+4+8,2))
+        case _: raise ValueError((f'Element {type(elem)}'
+                                 'not supported'))
+    return (doflocs,t)
+def test_manual_circle():
+    write_json=False
+    elem_classes = [sf.ElementTriP1]#,sf.ElementTriP2,sf.ElementTriP3]
+    ucs=[types.SimpleNamespace() for _ in range(len(elem_classes))]
+    mp_global=start_mp(nrows=len(elem_classes),ncols=2)
+    for row, uc in enumerate(ucs):
+        uc.profile='Unit circle'
+        uc.elem=elem_classes[row]()
+        match elem_classes[row]:
+            case sf.ElementTriP1: mc=sf.MeshTri
+            case _: mc=sf.MeshTri2
+        (doflocs,t)=get_mesh_data_for_circle(uc.elem)
+        mesh=mc(doflocs=doflocs,t=t,
+                elem=uc.elem)
+        uc.basis = sf.Basis(mesh,uc.elem)
+        if write_json:
+            sf_mesh_to_json(uc)
+        uc.mp=mp_global[row,0]
+        if hasattr(uc,'name'):
+            del uc.name
+        qtplot(uc)
+        sp(uc)
+        uc.mp=mp_global[row,1]
+        qtplot(uc)
+        report_sp(uc)
+    return ucs
+"""
+mcs=test_manual_circle()
+qtplot(mcs[0,0])
+qtplot(mcs[1,1])
 """
 #%% circle_area
 def circle_area(r=1.0, ntri=32):
