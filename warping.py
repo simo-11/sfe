@@ -1465,18 +1465,34 @@ qtplot(ccs[0])
 qtplot(ccs[1])
 """
 #%% manual circle
-def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None):
+def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
     match type(elem):
         case sf.ElementTriP1:
             if n_elem==None:
                 n_elem=4*6
             doflocs=np.zeros((2,1+n_elem))
-            doflocs[:,1:]=Profile.arc(0,0,1,0,2*np.pi,n_elem)
+            doflocs[:,1:]=Profile.arc(0,0,r,0,2*np.pi,n_elem)
             t=np.zeros((3,n_elem),dtype=np.int32)
-            t[1,:]=np.arange(1,n_elem+1)
-            t[2,:]=np.concat([np.arange(2,n_elem+1),np.arange(1,2)])
+            t[1,:]=np.r_[1:n_elem+1]
+            t[2,:]=np.r_[2:n_elem+1,1]
         case sf.ElementTriP2:
-            doflocs=np.zeros((1+4+8,2))
+            if n_elem==None:
+                n_elem=4*2
+            doflocs=np.zeros((2,1+n_elem*3))
+            doflocs[:,1:1+n_elem]=Profile.arc(0,0,r,0,2*np.pi,n_elem)
+            rs1=1+n_elem
+            doflocs[:,rs1:rs1+n_elem]=Profile.arc(0,0,r/2,0,2*np.pi,n_elem)
+            rs2=rs1+n_elem
+            d_theta=np.pi/n_elem
+            doflocs[:,rs2:rs2+n_elem]=Profile.arc(0,0,r,d_theta
+                                                  ,2*np.pi+d_theta,n_elem)
+            nodes_in_elem=6
+            t=np.zeros((nodes_in_elem,n_elem),dtype=np.int32)
+            t[1,:]=np.r_[1:n_elem+1]
+            t[2,:]=np.r_[2:n_elem+1,1]
+            t[3,:]=np.r_[rs1:rs2]
+            t[4,:]=np.r_[rs2:rs2+n_elem]
+            t[5,:]=np.r_[rs1+1:rs2,rs1]
         case sf.ElementTriP3:
             doflocs=np.zeros((1+4+4+4+4+8,2))
         case _: raise ValueError((f'Element {type(elem)}'
@@ -1484,7 +1500,7 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None):
     return (doflocs,t)
 def test_manual_circle():
     write_json=False
-    elem_classes = [sf.ElementTriP1]#,sf.ElementTriP2,sf.ElementTriP3]
+    elem_classes = [sf.ElementTriP1,sf.ElementTriP2]#,sf.ElementTriP3]
     ucs=[types.SimpleNamespace() for _ in range(len(elem_classes))]
     mp_global=start_mp(nrows=len(elem_classes),ncols=2)
     for row, uc in enumerate(ucs):
@@ -1496,6 +1512,7 @@ def test_manual_circle():
         (doflocs,t)=get_mesh_data_for_circle(uc.elem)
         mesh=mc(doflocs=doflocs,t=t,
                 elem=uc.elem)
+        vedo_plot_mesh(mesh,logging.DEBUG)
         uc.basis = sf.Basis(mesh,uc.elem)
         if write_json:
             sf_mesh_to_json(uc)
