@@ -278,7 +278,7 @@ class Profile:
             qtplot(uc,scale=-0.1)
         return uc
 
-def vedo_plot_mesh(mesh: sf.Mesh,log_level):
+def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
     from vtk.util.numpy_support import numpy_to_vtk
     vp=start_vp()
     if logger.isEnabledFor(log_level):
@@ -288,7 +288,7 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level):
     if pts.shape[1]==2:
         z = np.zeros((pts.shape[0],1))
         pts = np.hstack([pts, z])
-    cells = mesh.t.T
+    cells = mesh.dofs.element_dofs.T
     vtk_pts = vtk.vtkPoints()
     vtk_array = numpy_to_vtk(
         pts, deep=False, array_type=vtk.VTK_FLOAT
@@ -311,17 +311,16 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level):
         else:
             g=ugrid2
         g.InsertNextCell(ctype, nverts, cell.astype(np.int64))
-    vm1=vedo.Mesh(ugrid1)
     match ctype:
         case vtk.VTK_QUADRATIC_TRIANGLE:
-            sub = vtk.vtkAdaptiveSubdivisionFilter()
-            sub.SetInputData(vm1.dataset)
-            sub.SetMaximumEdgeLength(0.01*(np.max(pts)-np.min(pts)))
-            sub.Update()
-            vm1 = vedo.Mesh(sub.GetOutput())
+            smooth1 = tessellate(pv.UnstructuredGrid(ugrid1))
+            ugrid1=smooth1.cast_to_unstructured_grid()
+            smooth2 = tessellate(pv.UnstructuredGrid(ugrid2))
+            ugrid2=smooth2.cast_to_unstructured_grid()
+    vm1=vedo.Mesh(ugrid1)
+    vm2=vedo.Mesh(ugrid2)
     vm1.alpha(0.2).c("cyan")
     vp.add_actor(vm1.actor)
-    vm2=vedo.Mesh(ugrid2)
     vm2.alpha(0.2).c("magenta")
     vp.add_actor(vm2.actor)
     for i, p in enumerate(mesh.p.T):
@@ -960,6 +959,9 @@ def start_vp():
     else:
         vp_mp = pyvistaqt.MultiPlotter(nrows=1,ncols=1)
         vp=vp_mp[0,0]
+        vp.view_xy()
+        vp.camera.up = (0, 0, 1)
+        vp.reset_camera()
         vp.show()
     return vp
 
@@ -1022,7 +1024,7 @@ def qtplot(uc,scale=None, show_edges=False, **kwargs):
     except AttributeError as e:
         logger.debug(f"First run {e}")
     if uc.vtk_tessellate>0:
-        smooth_mesh = tessellate(mesh,uc.vtk_tessellate)
+        smooth_mesh = tessellate(mesh,max_n_subdivide=uc.vtk_tessellate)
         if show_edges==None:
             show_edges=False
     else:
@@ -1500,7 +1502,7 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
     return (doflocs,t)
 def test_manual_circle():
     write_json=False
-    elem_classes = [sf.ElementTriP1,sf.ElementTriP2]#,sf.ElementTriP3]
+    elem_classes = [sf.ElementTriP2]#,sf.ElementTriP2]#,sf.ElementTriP3]
     ucs=[types.SimpleNamespace() for _ in range(len(elem_classes))]
     mp_global=start_mp(nrows=len(elem_classes),ncols=2)
     for row, uc in enumerate(ucs):
@@ -1510,8 +1512,7 @@ def test_manual_circle():
             case sf.ElementTriP1: mc=sf.MeshTri
             case _: mc=sf.MeshTri2
         (doflocs,t)=get_mesh_data_for_circle(uc.elem)
-        mesh=mc(doflocs=doflocs,t=t,
-                elem=uc.elem)
+        mesh=mc(doflocs=doflocs,t=t,elem=uc.elem)
         vedo_plot_mesh(mesh,logging.DEBUG)
         uc.basis = sf.Basis(mesh,uc.elem)
         if write_json:
@@ -1527,8 +1528,10 @@ def test_manual_circle():
     return ucs
 """
 mcs=test_manual_circle()
-qtplot(mcs[0,0])
-qtplot(mcs[1,1])
+vedo_plot_mesh(mcs[0].basis.mesh)
+vedo_plot_mesh(mcs[0].basis.mesh,logging.INFO)
+qtplot(mcs[0])
+qtplot(mcs[1])
 """
 #%% circle_area
 def circle_area(r=1.0, ntri=32):
