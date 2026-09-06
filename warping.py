@@ -1502,7 +1502,7 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
     return (doflocs,t)
 def test_manual_circle():
     write_json=False
-    elem_classes = [sf.ElementTriP2]#,sf.ElementTriP2]#,sf.ElementTriP3]
+    elem_classes = [sf.ElementTriP1,sf.ElementTriP2]#,sf.ElementTriP3]
     ucs=[types.SimpleNamespace() for _ in range(len(elem_classes))]
     mp_global=start_mp(nrows=len(elem_classes),ncols=2)
     for row, uc in enumerate(ucs):
