@@ -306,13 +306,21 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
     for i,cell in enumerate(cells):
         nverts = len(cell)
         ctype = mapping.get(nverts, vtk.VTK_POLYGON)
+        match ctype:
+            case vtk.VTK_LAGRANGE_TRIANGLE:
+                vtk_cell=cell.copy()
+                vtk_cell[[7, 8]] = vtk_cell[[8, 7]]
+            case _:
+                vtk_cell=cell
         if i%2==0:
             g=ugrid1
         else:
             g=ugrid2
-        g.InsertNextCell(ctype, nverts, cell.astype(np.int64))
+        g.InsertNextCell(ctype, nverts, vtk_cell.astype(np.int64))
     match ctype:
-        case vtk.VTK_QUADRATIC_TRIANGLE:
+        case vtk.VTK_TRIANGLE:
+            pass
+        case _:
             smooth1 = tessellate(pv.UnstructuredGrid(ugrid1))
             ugrid1=smooth1.cast_to_unstructured_grid()
             smooth2 = tessellate(pv.UnstructuredGrid(ugrid2))
@@ -1496,13 +1504,43 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
             t[4,:]=np.r_[rs2:rs2+n_elem]
             t[5,:]=np.r_[rs1+1:rs2,rs1]
         case sf.ElementTriP3:
-            doflocs=np.zeros((1+4+4+4+4+8,2))
+            if n_elem==None:
+                n_elem=4*1
+            doflocs=np.zeros((2,1+n_elem*6))
+            doflocs[:,1:1+n_elem]=Profile.arc(0,0,r,0,2*np.pi,n_elem)
+            rs1=1+n_elem
+            doflocs[:,rs1:rs1+n_elem]=Profile.arc(0,0,r/3,0,2*np.pi,n_elem)
+            rs2=rs1+n_elem
+            doflocs[:,rs2:rs2+n_elem]=Profile.arc(0,0,2*r/3,0,2*np.pi,n_elem)
+            rs3=rs2+n_elem
+            d_theta=2/3*np.pi/n_elem
+            doflocs[:,rs3:rs3+n_elem]=Profile.arc(0,0,r,d_theta
+                                                  ,2*np.pi+d_theta,n_elem)
+            rs4=rs3+n_elem
+            d_theta=4/3*np.pi/n_elem
+            doflocs[:,rs4:rs4+n_elem]=Profile.arc(0,0,r,d_theta
+                                                  ,2*np.pi+d_theta,n_elem)
+            rs5=rs4+n_elem
+            d_theta=np.pi/n_elem
+            doflocs[:,rs5:rs5+n_elem]=Profile.arc(0,0,r/2,d_theta
+                                                  ,2*np.pi+d_theta,n_elem)
+            nodes_in_elem=10
+            t=np.zeros((nodes_in_elem,n_elem),dtype=np.int32)
+            t[1,:]=np.r_[1:n_elem+1]
+            t[2,:]=np.r_[2:n_elem+1,1]
+            t[3,:]=np.r_[rs1:rs2]
+            t[4,:]=np.r_[rs2:rs3]
+            t[5,:]=np.r_[rs3:rs4]
+            t[6,:]=np.r_[rs4:rs5]
+            t[7,:]=np.r_[rs1+1:rs2,rs1]
+            t[8,:]=np.r_[rs2+1:rs3,rs2]
+            t[9,:]=np.r_[rs5:rs5+n_elem]
         case _: raise ValueError((f'Element {type(elem)}'
                                  'not supported'))
     return (doflocs,t)
 def test_manual_circle():
     write_json=False
-    elem_classes = [sf.ElementTriP1,sf.ElementTriP2]#,sf.ElementTriP3]
+    elem_classes = [sf.ElementTriP1,sf.ElementTriP2,sf.ElementTriP3]
     ucs=[types.SimpleNamespace() for _ in range(len(elem_classes))]
     mp_global=start_mp(nrows=len(elem_classes),ncols=2)
     for row, uc in enumerate(ucs):
