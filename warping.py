@@ -149,6 +149,142 @@ def check_mesh(mesh: sf.Mesh):
         vedo_plot_mesh(mesh,logging.WARNING)
         mesh.is_valid(raise_=True)
 
+def gmsh_loop_debug(curve_tags):
+    """
+    Diagnose whether a list of curve tags can form a valid curve loop.
+    Does NOT require addCurveLoop() to succeed.
+    """
+    print("\n=== Curve Diagnostics ===")
+    print(f"Input curves: {curve_tags}")
+
+    # Step 1: get boundary points for each curve in positive orientation
+    boundaries = {}
+    for tag in curve_tags:
+        b = gmsh.model.getBoundary([(1, tag)], oriented=True)
+        boundaries[tag] = b
+        print(f"Curve {tag}: boundary {b}")
+
+    print("\n--- Continuity check (positive orientation) ---")
+    ok = True
+    for a, b in zip(curve_tags, curve_tags[1:] + curve_tags[:1]):
+        end_a = boundaries[a][-1][1]
+        start_b = boundaries[b][0][1]
+        if end_a != start_b:
+            print(f"Mismatch: {a} ends at {end_a}, "
+                  f"but {b} starts at {start_b}")
+            ok = False
+        else:
+            print(f"OK: {a} → {b}")
+
+    if ok:
+        print("\nCurves form a valid loop in positive orientation.")
+        return True
+
+    print("\n--- Trying orientation flips ---")
+
+    # Try all combinations of flipping curves
+    # (small loops only; your loop has 3–4 curves)
+    from itertools import product
+
+    for flips in product([1, -1], repeat=len(curve_tags)):
+        oriented = [tag * flip for tag, flip in zip(curve_tags, flips)]
+        # compute boundaries with orientation
+        oriented_boundaries = {}
+        for tag in oriented:
+            base = abs(tag)
+            b = gmsh.model.getBoundary([(1, base)], oriented=True)
+            if tag < 0:
+                b = b[::-1]
+            oriented_boundaries[tag] = b
+
+        # check continuity
+        ok2 = True
+        for a, b in zip(oriented, oriented[1:] + oriented[:1]):
+            end_a = oriented_boundaries[a][-1][1]
+            start_b = oriented_boundaries[b][0][1]
+            if end_a != start_b:
+                ok2 = False
+                break
+
+        if ok2:
+            print("\nFound valid orientation:")
+            print(oriented)
+            print("You should call addCurveLoop with these tags.")
+            return oriented
+
+    print("\nNo orientation makes these curves form a closed loop.")
+    return False
+
+def gsmh_annulus(cx, cy, ri, ro, a0, a1, show=False):
+    """
+    Create one P3 triangle inside an annulus sector. If ri = 0, the
+    geometry becomes a pizza-slice. One edge is a circular arc at
+    radius ro, two edges are radial lines from ri to ro.
+    """
+    if gmsh.isInitialized()!=1:
+        gmsh.initialize()
+    gmsh.model.add("annulus_p3")
+    if not ri==0:
+        # Inner arc endpoints
+        x0i = cx + ri * math.cos(a0)
+        y0i = cy + ri * math.sin(a0)
+        x1i = cx + ri * math.cos(a1)
+        y1i = cy + ri * math.sin(a1)
+    # Outer arc endpoints
+    x0o = cx + ro * math.cos(a0)
+    y0o = cy + ro * math.sin(a0)
+    x1o = cx + ro * math.cos(a1)
+    y1o = cy + ro * math.sin(a1)
+    # Add points
+    if ri==0:
+        pi = gmsh.model.geo.addPoint(cx, cy, 0)
+    else:
+        pi0 = gmsh.model.geo.addPoint(x0i, y0i, 0)
+        pi1 = gmsh.model.geo.addPoint(x1i, y1i, 0)
+    po0 = gmsh.model.geo.addPoint(x0o, y0o, 0)
+    po1 = gmsh.model.geo.addPoint(x1o, y1o, 0)
+    # Center point for circle arcs
+    pc = gmsh.model.geo.addPoint(cx, cy, 0)
+    # circular arcs
+    arco = gmsh.model.geo.addCircleArc(po0, pc, po1)
+    if not ri==0:
+        arci = gmsh.model.geo.addCircleArc(pi0, pc, pi1)
+    # Radial edges
+    if ri==0:
+        l1 = gmsh.model.geo.addLine(pi, po0)
+        l2 = gmsh.model.geo.addLine(pi, po1)
+        loop_list=[arco, -l2, l1]
+    else:
+        l1 = gmsh.model.geo.addLine(pi0, po0)
+        l2 = gmsh.model.geo.addLine(pi1, po1)
+        loop_list=[arco, -l2, -arci, l1]
+    try:
+        loop = gmsh.model.geo.addCurveLoop(loop_list)
+    except Exception as e:
+        gmsh_loop_debug(loop_list)
+        raise e
+    # Surface
+    surf = gmsh.model.geo.addPlaneSurface([loop])
+    gmsh.model.geo.synchronize()
+    if not ri==0:
+        gmsh.model.mesh.setTransfiniteCurve(arci, 2)
+    gmsh.model.mesh.setTransfiniteCurve(arco, 2)
+    gmsh.model.mesh.setTransfiniteCurve(l1, 2)
+    gmsh.model.mesh.setTransfiniteCurve(l2, 2)
+    gmsh.model.mesh.setTransfiniteSurface(surf)
+    # High-order triangle (P3 = 10 nodes)
+    gmsh.option.setNumber("Mesh.ElementOrder", 3)
+    gmsh.option.setNumber("Mesh.HighOrderOptimize", 1)
+    gmsh.model.mesh.generate(2)
+    if show:
+        gmsh.fltk.run()
+    # Return mesh data
+    node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
+    et, etags, enodes = gmsh.model.mesh.getElements()
+    gmsh.finalize()
+    return node_tags, node_coords, et, etags, enodes
+
+
 class Profile:
     """Mesh generator for RHS and U profiles."""
 
@@ -1521,9 +1657,6 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
             doflocs[:,rs4:rs4+n_elem]=Profile.arc(0,0,r,d_theta
                                                   ,2*np.pi+d_theta,n_elem)
             rs5=rs4+n_elem
-            d_theta=np.pi/n_elem
-            doflocs[:,rs5:rs5+n_elem]=Profile.arc(0,0,r/2,d_theta
-                                                  ,2*np.pi+d_theta,n_elem)
             nodes_in_elem=10
             t=np.zeros((nodes_in_elem,n_elem),dtype=np.int32)
             t[1,:]=np.r_[1:n_elem+1]
@@ -1534,6 +1667,23 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
             t[6,:]=np.r_[rs4:rs5]
             t[7,:]=np.r_[rs1+1:rs2,rs1]
             t[8,:]=np.r_[rs2+1:rs3,rs2]
+            """ find a way to put middle node to (1/3,1/3)
+            e = sf.ElementTriP3()
+            xi_eta = np.array([1/3, 1/3])
+            N = np.zeros(nodes_in_elem)
+            for i in range(nodes_in_elem):
+                phi, _ = e.lbasis(xi_eta, i)
+                N[i] = phi
+            for i in n_elem:
+                nodes=doflocs[]
+                x_int = nodes.T @ N[:9]
+            doflocs[:,rs5:rs5+n_elem]=x_int
+e = sf.ElementTriP3()
+xi_eta = e.doflocs[:, 9].reshape(2, 1)
+gb = e.gbasis(xi_eta)
+N = gb.N[:, 0]  # length 10
+N[:9]
+"""
             t[9,:]=np.r_[rs5:rs5+n_elem]
         case _: raise ValueError((f'Element {type(elem)}'
                                  'not supported'))
