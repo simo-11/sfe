@@ -215,6 +215,25 @@ def gmsh_loop_debug(curve_tags):
     print("\nNo orientation makes these curves form a closed loop.")
     return False
 
+import threading
+import time
+
+run_flkt_loop=False
+def gmsh_fltk_loop():
+    global run_flkt_loop
+    gmsh.fltk.initialize()
+    gmsh.graphics.draw()
+    run_flkt_loop=True
+    while gmsh.fltk.isAvailable() and run_flkt_loop:
+        gmsh.fltk.wait()
+        time.sleep(0.01)
+
+def show_gmsh_ui():
+    if gmsh.fltk.isAvailable()==0:
+        global fltk_thread
+        fltk_thread = threading.Thread(target=gmsh_fltk_loop, daemon=True)
+        fltk_thread.start()
+
 def gsmh_annulus(cx, cy, ri, ro, a0, a1, show=False):
     """
     Create one P3 triangle inside an annulus sector. If ri = 0, the
@@ -277,7 +296,7 @@ def gsmh_annulus(cx, cy, ri, ro, a0, a1, show=False):
     gmsh.option.setNumber("Mesh.HighOrderOptimize", 1)
     gmsh.model.mesh.generate(2)
     if show:
-        gmsh.fltk.run()
+        show_gmsh_ui()
     # Return mesh data
     node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
     et, etags, enodes = gmsh.model.mesh.getElements()
