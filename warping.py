@@ -149,92 +149,9 @@ def check_mesh(mesh: sf.Mesh):
         vedo_plot_mesh(mesh,logging.WARNING)
         mesh.is_valid(raise_=True)
 
-def gmsh_loop_debug(curve_tags):
-    """
-    Diagnose whether a list of curve tags can form a valid curve loop.
-    Does NOT require addCurveLoop() to succeed.
-    """
-    print("\n=== Curve Diagnostics ===")
-    print(f"Input curves: {curve_tags}")
-
-    # Step 1: get boundary points for each curve in positive orientation
-    boundaries = {}
-    for tag in curve_tags:
-        b = gmsh.model.getBoundary([(1, tag)], oriented=True)
-        boundaries[tag] = b
-        print(f"Curve {tag}: boundary {b}")
-
-    print("\n--- Continuity check (positive orientation) ---")
-    ok = True
-    for a, b in zip(curve_tags, curve_tags[1:] + curve_tags[:1]):
-        end_a = boundaries[a][-1][1]
-        start_b = boundaries[b][0][1]
-        if end_a != start_b:
-            print(f"Mismatch: {a} ends at {end_a}, "
-                  f"but {b} starts at {start_b}")
-            ok = False
-        else:
-            print(f"OK: {a} → {b}")
-
-    if ok:
-        print("\nCurves form a valid loop in positive orientation.")
-        return True
-
-    print("\n--- Trying orientation flips ---")
-
-    # Try all combinations of flipping curves
-    # (small loops only; your loop has 3–4 curves)
-    from itertools import product
-
-    for flips in product([1, -1], repeat=len(curve_tags)):
-        oriented = [tag * flip for tag, flip in zip(curve_tags, flips)]
-        # compute boundaries with orientation
-        oriented_boundaries = {}
-        for tag in oriented:
-            base = abs(tag)
-            b = gmsh.model.getBoundary([(1, base)], oriented=True)
-            if tag < 0:
-                b = b[::-1]
-            oriented_boundaries[tag] = b
-
-        # check continuity
-        ok2 = True
-        for a, b in zip(oriented, oriented[1:] + oriented[:1]):
-            end_a = oriented_boundaries[a][-1][1]
-            start_b = oriented_boundaries[b][0][1]
-            if end_a != start_b:
-                ok2 = False
-                break
-
-        if ok2:
-            print("\nFound valid orientation:")
-            print(oriented)
-            print("You should call addCurveLoop with these tags.")
-            return oriented
-
-    print("\nNo orientation makes these curves form a closed loop.")
-    return False
-
-import threading
-import time
-
-run_flkt_loop=False
-def gmsh_fltk_loop():
-    global run_flkt_loop
-    gmsh.fltk.initialize()
-    gmsh.graphics.draw()
-    run_flkt_loop=True
-    while gmsh.fltk.isAvailable() and run_flkt_loop:
-        gmsh.fltk.wait()
-        time.sleep(0.01)
-
-def show_gmsh_ui():
-    if gmsh.fltk.isAvailable()==0:
-        global fltk_thread
-        fltk_thread = threading.Thread(target=gmsh_fltk_loop, daemon=True)
-        fltk_thread.start()
-
-def gsmh_annulus(cx, cy, ri, ro, a0, a1, show=False):
+def gmsh_annulus(cx, cy, ri, ro, a0, a1,
+                 mshFileName=None,
+                 show=False):
     """
     Create one P3 triangle inside an annulus sector. If ri = 0, the
     geometry becomes a pizza-slice. One edge is a circular arc at
@@ -255,33 +172,27 @@ def gsmh_annulus(cx, cy, ri, ro, a0, a1, show=False):
     x1o = cx + ro * math.cos(a1)
     y1o = cy + ro * math.sin(a1)
     # Add points
-    if ri==0:
-        pi = gmsh.model.geo.addPoint(cx, cy, 0)
-    else:
+    # Center point for circle arcs
+    pc = gmsh.model.geo.addPoint(cx, cy, 0)
+    if not ri==0:
         pi0 = gmsh.model.geo.addPoint(x0i, y0i, 0)
         pi1 = gmsh.model.geo.addPoint(x1i, y1i, 0)
     po0 = gmsh.model.geo.addPoint(x0o, y0o, 0)
     po1 = gmsh.model.geo.addPoint(x1o, y1o, 0)
-    # Center point for circle arcs
-    pc = gmsh.model.geo.addPoint(cx, cy, 0)
     # circular arcs
     arco = gmsh.model.geo.addCircleArc(po0, pc, po1)
     if not ri==0:
         arci = gmsh.model.geo.addCircleArc(pi0, pc, pi1)
     # Radial edges
     if ri==0:
-        l1 = gmsh.model.geo.addLine(pi, po0)
-        l2 = gmsh.model.geo.addLine(pi, po1)
+        l1 = gmsh.model.geo.addLine(pc, po0)
+        l2 = gmsh.model.geo.addLine(pc, po1)
         loop_list=[arco, -l2, l1]
     else:
         l1 = gmsh.model.geo.addLine(pi0, po0)
         l2 = gmsh.model.geo.addLine(pi1, po1)
         loop_list=[arco, -l2, -arci, l1]
-    try:
-        loop = gmsh.model.geo.addCurveLoop(loop_list)
-    except Exception as e:
-        gmsh_loop_debug(loop_list)
-        raise e
+    loop = gmsh.model.geo.addCurveLoop(loop_list)
     # Surface
     surf = gmsh.model.geo.addPlaneSurface([loop])
     gmsh.model.geo.synchronize()
@@ -296,7 +207,13 @@ def gsmh_annulus(cx, cy, ri, ro, a0, a1, show=False):
     gmsh.option.setNumber("Mesh.HighOrderOptimize", 1)
     gmsh.model.mesh.generate(2)
     if show:
-        show_gmsh_ui()
+        gmsh.fltk.run()
+    if mshFileName!=None:
+        gmsh.option.setNumber("Mesh.Format", 1)
+        gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+        fn=f"msh/{mshFileName}.msh"
+        gmsh.write(fn)
+        logger.info("Wrote %s",fn)
     # Return mesh data
     node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
     et, etags, enodes = gmsh.model.mesh.getElements()
