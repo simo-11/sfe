@@ -209,9 +209,7 @@ def gmsh_annulus(cx, cy, ri, ro, a0, a1,
     if show:
         gmsh.fltk.run()
     if mshFileName!=None:
-        gmsh.option.setNumber("Mesh.Format", 1)
-        gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
-        fn=f"msh/{mshFileName}.msh"
+        fn=f"msh/{mshFileName}"
         gmsh.write(fn)
         logger.info("Wrote %s",fn)
     # Return mesh data
