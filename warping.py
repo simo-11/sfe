@@ -1591,6 +1591,10 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
             doflocs[:,rs4:rs4+n_elem]=Profile.arc(0,0,r,d_theta
                                                   ,2*np.pi+d_theta,n_elem)
             rs5=rs4+n_elem
+            d_theta=np.pi/n_elem
+            r_in=0.64395*r# from gmsh using gmsh_annulus
+            doflocs[:,rs5:rs5+n_elem]=Profile.arc(0,0,r_in,d_theta
+                                                  ,2*np.pi+d_theta,n_elem)
             nodes_in_elem=10
             t=np.zeros((nodes_in_elem,n_elem),dtype=np.int32)
             t[1,:]=np.r_[1:n_elem+1]
@@ -1601,23 +1605,6 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
             t[6,:]=np.r_[rs4:rs5]
             t[7,:]=np.r_[rs1+1:rs2,rs1]
             t[8,:]=np.r_[rs2+1:rs3,rs2]
-            """ find a way to put middle node to (1/3,1/3)
-            e = sf.ElementTriP3()
-            xi_eta = np.array([1/3, 1/3])
-            N = np.zeros(nodes_in_elem)
-            for i in range(nodes_in_elem):
-                phi, _ = e.lbasis(xi_eta, i)
-                N[i] = phi
-            for i in n_elem:
-                nodes=doflocs[]
-                x_int = nodes.T @ N[:9]
-            doflocs[:,rs5:rs5+n_elem]=x_int
-e = sf.ElementTriP3()
-xi_eta = e.doflocs[:, 9].reshape(2, 1)
-gb = e.gbasis(xi_eta)
-N = gb.N[:, 0]  # length 10
-N[:9]
-"""
             t[9,:]=np.r_[rs5:rs5+n_elem]
         case _: raise ValueError((f'Element {type(elem)}'
                                  'not supported'))
