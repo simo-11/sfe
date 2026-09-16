@@ -1025,7 +1025,7 @@ def start_mp(nrows=1, ncols=2,**kwargs):
             for j in range(ncols):
                 item=mp[i,j]
                 item.view_xy()
-                item.camera.up = (0, 0, 1)
+                item.camera.up = (0, 1, 0)
                 item.reset_camera()
     return mp
 
@@ -1038,7 +1038,7 @@ def start_vp():
         vp_mp = pyvistaqt.MultiPlotter(nrows=1,ncols=1)
         vp=vp_mp[0,0]
         vp.view_xy()
-        vp.camera.up = (0, 0, 1)
+        vp.camera.up = (0, 1, 0)
         vp.reset_camera()
         vp.show()
     return vp
@@ -1610,8 +1610,8 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
                                  'not supported'))
     return (doflocs,t)
 def test_manual_circle():
-    write_json=False
-    elem_classes = [sf.ElementTriP1,sf.ElementTriP2,sf.ElementTriP3]
+    write_json=True
+    elem_classes = [sf.ElementTriP3]#,sf.ElementTriP2,sf.ElementTriP3]
     ucs=[types.SimpleNamespace() for _ in range(len(elem_classes))]
     mp_global=start_mp(nrows=len(elem_classes),ncols=2)
     for row, uc in enumerate(ucs):
