@@ -432,6 +432,8 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
     if logger.isEnabledFor(log_level):
         sb.append("t")
         sb.append(str(mesh.t))
+        sb.append("dofs.element_dofs")
+        sb.append(str(mesh.dofs.element_dofs))
         logger.log(log_level,"\n".join(sb))
 
 def probe_value_and_grad(uc, P):
