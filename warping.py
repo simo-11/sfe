@@ -58,6 +58,7 @@ import meshio
 import vtk
 import vedo
 import traceback
+import debugpy
 
 def reset_logging():
     root = logging.getLogger()
@@ -1172,9 +1173,18 @@ scale={scale:.4G}, max warping={max_disp:.4G}
     uc.mp.reset_camera()
     uc.mp.render()
     return (scale)
+def wrapped_init(self, *args, **kwargs):
+    debugpy.breakpoint()
+    return globals()['orig_init'](self, *args, **kwargs)
+"""
+orig_init = sf.ElementLineP2.__init__
+sf.ElementLineP2.__init__ = wrapped_init
+sf.ElementLineP2.__init__=object.__init__
+
+"""
 
 def solve_warping(uc):
-    uc.t_basis=sf.Basis(uc.t_mesh, uc.elem)
+    uc.t_basis=sf.Basis(uc.t_mesh, uc.elem,mapping=uc.basis.mapping)
     # Stiffness matrix: ∫ grad(v)·grad(u) dA
     A = sf.asm(laplace, uc.t_basis)
     # boundary condition
@@ -1246,11 +1256,15 @@ def sp(uc):
     ixy=i_xy.assemble(uc.basis)
     sp["c"]=[cx,cy]
     sp["ic"]=[ixx,iyy,ixy]
-    m=uc.basis.mesh
-    p = m.p.copy()
-    t = m.t.copy()
-    p = p + np.array([[-cx], [-cy]])
-    uc.t_mesh=type(m)(p,t)
+    planA=False
+    if planA:
+        m=uc.basis.mesh
+        p = m.p.copy()
+        t = m.t.copy()
+        p = p + np.array([[-cx], [-cy]])
+        uc.t_mesh=type(m)(p,t)
+    else:
+        uc.t_mesh=uc.basis.mesh.translated([-cx,-cy])
     solve_warping(uc)
     @sf.Functional
     def i_xw(w):
@@ -1359,7 +1373,8 @@ def fill_uc_defaults(uc):
     if not hasattr(uc,'q') and hasattr(uc,'sp'):
         uc.q=0.8*uc.E*uc.sp['ic'][0]/(uc.L**3)# to get L/10 for cantilever
 
-def refine(src: types.SimpleNamespace,times: int)->types.SimpleNamespace:
+def refine_uc(src: types.SimpleNamespace,
+              times: int)->types.SimpleNamespace:
     uc=copy.copy(src)
     m=src.basis.mesh
     mesh=(type(m))(m.p,m.t).refined(times)
@@ -1613,29 +1628,47 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
     return (doflocs,t)
 def test_manual_circle():
     write_json=True
-    elem_classes = [sf.ElementTriP3]#,sf.ElementTriP2,sf.ElementTriP3]
+    elem_classes = [sf.ElementTriP2]#,sf.ElementTriP2,sf.ElementTriP3]
     ucs=[types.SimpleNamespace() for _ in range(len(elem_classes))]
     mp_global=start_mp(nrows=len(elem_classes),ncols=2)
     for row, uc in enumerate(ucs):
         uc.profile='Unit circle'
         uc.elem=elem_classes[row]()
         match elem_classes[row]:
-            case sf.ElementTriP1: mc=sf.MeshTri
-            case _: mc=sf.MeshTri2
+            case sf.ElementTriP1:
+                mc=sf.MeshTri
+            case _:
+                mc=sf.MeshTri2
         (doflocs,t)=get_mesh_data_for_circle(uc.elem)
         mesh=mc(doflocs=doflocs,t=t,elem=uc.elem)
-        vedo_plot_mesh(mesh,logging.DEBUG)
-        uc.basis = sf.Basis(mesh,uc.elem)
+        vedo_plot_mesh(mesh,logging.INFO)
+        match elem_classes[row]:
+            case sf.ElementTriP1:
+                mapping=sf.MappingAffine(mesh)
+            case sf.ElementTriP2:
+                mapping=sf.MappingIsoparametric(
+                    mesh,
+                    uc.elem,
+                    bndelem=sf.ElementLineP2())
+            case sf.ElementTriP3:
+                mapping=sf.MappingIsoparametric(
+                    mesh,
+                    uc.elem,
+                    bndelem=sf.ElementLinePp(3))
+        uc.basis = sf.Basis(mesh,uc.elem,mapping=mapping)
         if write_json:
             sf_mesh_to_json(uc)
         uc.mp=mp_global[row,0]
         if hasattr(uc,'name'):
             del uc.name
         qtplot(uc)
-        sp(uc)
-        uc.mp=mp_global[row,1]
-        qtplot(uc)
-        report_sp(uc)
+        try:
+            sp(uc)
+            uc.mp=mp_global[row,1]
+            qtplot(uc)
+            report_sp(uc)
+        except Exception:
+            logger.exception("Solve failed")
     return ucs
 """
 mcs=test_manual_circle()
