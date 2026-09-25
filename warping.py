@@ -219,6 +219,55 @@ def gmsh_annulus(cx, cy, ri, ro, a0, a1,
     gmsh.finalize()
     return node_tags, node_coords, et, etags, enodes
 
+class ElementLineP3(sf.ElementH1):
+    """Piecewise cubic element."""
+
+    nodal_dofs = 1
+    interior_dofs = 2
+    maxdeg = 3
+    dofnames = ['u', 'u', 'u']
+    doflocs = np.array([[0.],
+                        [1.],
+                        [1/3],
+                        [2/3]])
+    refdom = sf.refdom.RefLine
+
+    def lbasis(self, X, i):
+        # Local coordinate
+        x = X[0]
+
+        # Node locations
+        x0 = 0.0
+        x1 = 1.0
+        x2 = 1.0 / 3.0
+        x3 = 2.0 / 3.0
+
+        # Helper: Lagrange basis and derivative
+        def L(x, a, b, c):
+            return ((x - b) * (x - c)) / ((a - b) * (a - c))
+
+        def dL(x, a, b, c):
+            num = (2 * x - b - c)
+            den = ((a - b) * (a - c))
+            return num / den
+
+        if i == 0:
+            phi = L(x, x0, x2, x3)
+            dphi = np.array([dL(x, x0, x2, x3)])
+        elif i == 1:
+            phi = L(x, x1, x2, x3)
+            dphi = np.array([dL(x, x1, x2, x3)])
+        elif i == 2:
+            phi = L(x, x2, x0, x3)
+            dphi = np.array([dL(x, x2, x0, x3)])
+        elif i == 3:
+            phi = L(x, x3, x0, x2)
+            dphi = np.array([dL(x, x3, x0, x2)])
+        else:
+            self._index_error()
+
+        return phi, dphi
+
 
 class Profile:
     """Mesh generator for RHS and U profiles."""
@@ -1256,15 +1305,7 @@ def sp(uc):
     ixy=i_xy.assemble(uc.basis)
     sp["c"]=[cx,cy]
     sp["ic"]=[ixx,iyy,ixy]
-    planA=False
-    if planA:
-        m=uc.basis.mesh
-        p = m.p.copy()
-        t = m.t.copy()
-        p = p + np.array([[-cx], [-cy]])
-        uc.t_mesh=type(m)(p,t)
-    else:
-        uc.t_mesh=uc.basis.mesh.translated([-cx,-cy])
+    uc.t_mesh=uc.basis.mesh.translated([-cx,-cy])
     solve_warping(uc)
     @sf.Functional
     def i_xw(w):
@@ -1628,7 +1669,7 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
     return (doflocs,t)
 def test_manual_circle():
     write_json=True
-    elem_classes = [sf.ElementTriP2]#,sf.ElementTriP2,sf.ElementTriP3]
+    elem_classes = [sf.ElementTriP1,sf.ElementTriP2,sf.ElementTriP3]
     ucs=[types.SimpleNamespace() for _ in range(len(elem_classes))]
     mp_global=start_mp(nrows=len(elem_classes),ncols=2)
     for row, uc in enumerate(ucs):
@@ -1654,7 +1695,7 @@ def test_manual_circle():
                 mapping=sf.MappingIsoparametric(
                     mesh,
                     uc.elem,
-                    bndelem=sf.ElementLinePp(3))
+                    bndelem=ElementLineP3())
         uc.basis = sf.Basis(mesh,uc.elem,mapping=mapping)
         if write_json:
             sf_mesh_to_json(uc)
