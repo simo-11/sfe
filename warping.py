@@ -79,7 +79,9 @@ levels = {
     "DEBUG": [],#"sfe"],
     "INFO": ["sfe"],
     "WARNING": ["skfem.assembly.basis",
-                "skfem.assembly.form.form"
+                "skfem.assembly.form.form",
+                "skfem.assembly",
+                "skfem.utils"
             ]
 }
 LOGGING = {
@@ -218,6 +220,78 @@ def gmsh_annulus(cx, cy, ri, ro, a0, a1,
     et, etags, enodes = gmsh.model.mesh.getElements()
     gmsh.finalize()
     return node_tags, node_coords, et, etags, enodes
+
+class MappingCubicLine(sf.Mapping):
+    """Isoparametric cubic mapping for 1D MeshLine."""
+
+    def __init__(self, mesh: sf.MeshLine, elem: sf.Element):
+        self.mesh = mesh
+        self.elem = elem
+        self.dim = 1
+
+        # global node coordinates (1, ndofs)
+        self.p = self.mesh.doflocs
+        # element -> dofs connectivity (ndofs_per_elem, nelems)
+        self.t = self.mesh.dofs.element_dofs
+
+    def F(self, X, tind=None):
+        """
+        Physical coordinates x(ξ) = Σ x_i φ_i(ξ).
+
+        X: shape (1, npts)
+        """
+        X = np.atleast_2d(X)
+        npts = X.shape[1]
+
+        if tind is None:
+            nelems = self.t.shape[1]
+            out = np.zeros((self.dim, nelems, npts))
+            elems = np.arange(nelems)
+        else:
+            elems = np.asarray(tind)
+            nelems = elems.size
+            out = np.zeros((self.dim, nelems, npts))
+
+        for i_local in range(self.t.shape[0]):
+            phi, _ = self.elem.lbasis(X, i_local)
+            g = self.t[i_local, elems]
+            out[0, :, :] += self.p[0, g][:, None] * phi
+
+        return out
+
+    def J(self, X, tind=None):
+        """
+        Jacobian dx/dξ, sama shape kuin F.
+        """
+        X = np.atleast_2d(X)
+        npts = X.shape[1]
+
+        if tind is None:
+            nelems = self.t.shape[1]
+            out = np.zeros((self.dim, nelems, npts))
+            elems = np.arange(nelems)
+        else:
+            elems = np.asarray(tind)
+            nelems = elems.size
+            out = np.zeros((self.dim, nelems, npts))
+
+        for i_local in range(self.t.shape[0]):
+            _, dphi = self.elem.lbasis(X, i_local)
+            g = self.t[i_local, elems]
+            out[0, :, :] += self.p[0, g][:, None] * dphi[0]
+
+        return out
+
+    def detJ(self, X, tind=None):
+        J = self.J(X, tind)
+        return np.abs(J[0, :, :])
+
+    def invJ(self, X, tind=None):
+        J = self.J(X, tind)
+        out = np.zeros_like(J)
+        out[0, :, :] = 1.0 / J[0, :, :]
+        return out
+
 
 class ElementLineP3(sf.ElementH1):
     """Piecewise cubic element."""
@@ -1340,7 +1414,7 @@ def report_sp(uc):
     m4=scale**4
     m6=scale**6
     print(f'''Section properties for {uc.profile}
-  using {uc.name}, {uc.basis.N} DOFs
+  using {uc.name}, {uc.basis.N} DOFs, {uc.basis.X.shape[1]} point integration
   area={uc.sp['area']/(scale**2):.6G}
   c=[{uc.sp['c'][0]/scale:.6G},{uc.sp['c'][1]/scale:.6G}]
   ic=[{uc.sp['ic'][0]/m4:.6G}, \
@@ -1607,7 +1681,7 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
     match type(elem):
         case sf.ElementTriP1:
             if n_elem==None:
-                n_elem=4*6
+                n_elem=4*1
             doflocs=np.zeros((2,1+n_elem))
             doflocs[:,1:]=Profile.arc(0,0,r,0,2*np.pi,n_elem)
             t=np.zeros((3,n_elem),dtype=np.int32)
@@ -1615,7 +1689,7 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
             t[2,:]=np.r_[2:n_elem+1,1]
         case sf.ElementTriP2:
             if n_elem==None:
-                n_elem=4*2
+                n_elem=4*1
             doflocs=np.zeros((2,1+n_elem*3))
             doflocs[:,1:1+n_elem]=Profile.arc(0,0,r,0,2*np.pi,n_elem)
             rs1=1+n_elem
@@ -1669,7 +1743,7 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
     return (doflocs,t)
 def test_manual_circle():
     write_json=True
-    elem_classes = [sf.ElementTriP1,sf.ElementTriP2,sf.ElementTriP3]
+    elem_classes = [sf.ElementTriP3]#,sf.ElementTriP2,sf.ElementTriP3]
     ucs=[types.SimpleNamespace() for _ in range(len(elem_classes))]
     mp_global=start_mp(nrows=len(elem_classes),ncols=2)
     for row, uc in enumerate(ucs):
@@ -1682,7 +1756,7 @@ def test_manual_circle():
                 mc=sf.MeshTri2
         (doflocs,t)=get_mesh_data_for_circle(uc.elem)
         mesh=mc(doflocs=doflocs,t=t,elem=uc.elem)
-        vedo_plot_mesh(mesh,logging.INFO)
+        vedo_plot_mesh(mesh,logging.DEBUG)
         match elem_classes[row]:
             case sf.ElementTriP1:
                 mapping=sf.MappingAffine(mesh)
@@ -1696,20 +1770,22 @@ def test_manual_circle():
                     mesh,
                     uc.elem,
                     bndelem=ElementLineP3())
-        uc.basis = sf.Basis(mesh,uc.elem,mapping=mapping)
-        if write_json:
-            sf_mesh_to_json(uc)
-        uc.mp=mp_global[row,0]
-        if hasattr(uc,'name'):
-            del uc.name
-        qtplot(uc)
-        try:
-            sp(uc)
-            uc.mp=mp_global[row,1]
+        for intorder in [None]:#range(1,10,2):# default is 2 * elem.maxdeg
+            uc.basis = sf.Basis(mesh,uc.elem,
+                                mapping=mapping,intorder=intorder)
+            if write_json:
+                sf_mesh_to_json(uc)
+            uc.mp=mp_global[row,0]
+            if hasattr(uc,'name'):
+                del uc.name
             qtplot(uc)
-            report_sp(uc)
-        except Exception:
-            logger.exception("Solve failed")
+            try:
+                sp(uc)
+                uc.mp=mp_global[row,1]
+                qtplot(uc)
+                report_sp(uc)
+            except Exception:
+                logger.exception("Solve failed")
     return ucs
 """
 mcs=test_manual_circle()
