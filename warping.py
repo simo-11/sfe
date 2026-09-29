@@ -477,7 +477,7 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
     vp=start_vp()
     if logger.isEnabledFor(log_level):
         sb=[]
-        sb.append("vedo_plot_mesh: p")
+        sb.append(f"vedo_plot_mesh: p{mesh.p.shape}")
     pts = mesh.p.T.copy()
     if pts.shape[1]==2:
         z = np.zeros((pts.shape[0],1))
@@ -537,7 +537,7 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
     labels,
     font_size=18,
     text_color="black",
-    point_color="red",
+    point_color="black",
     render_points_as_spheres=True,
     always_visible=True,
     )
@@ -548,16 +548,29 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
     labels,
     font_size=18,
     text_color="white",
+    point_color="white",
+    render_points_as_spheres=True,
+    always_visible=True,
+    )
+    facets = pts.T[:, mesh.facets].mean(axis=1).T
+    labels = np.arange(mesh.facets.shape[1])
+    vp.add_point_labels(
+    facets,
+    labels,
+    font_size=18,
+    text_color="blue",
     point_color="blue",
     render_points_as_spheres=True,
     always_visible=True,
     )
     vp.render()
     if logger.isEnabledFor(log_level):
-        sb.append("t")
+        sb.append(f"t{mesh.t.shape}")
         sb.append(str(mesh.t))
-        sb.append("dofs.element_dofs")
+        sb.append(f"dofs.element_dofs{mesh.dofs.element_dofs.shape}")
         sb.append(str(mesh.dofs.element_dofs))
+        sb.append(f"facets{mesh.facets.shape}")
+        sb.append(str(mesh.facets))
         logger.log(log_level,"\n".join(sb))
 
 def probe_value_and_grad(uc, P):
@@ -1743,7 +1756,7 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
     return (doflocs,t)
 def test_manual_circle():
     write_json=True
-    elem_classes = [sf.ElementTriP3]#,sf.ElementTriP2,sf.ElementTriP3]
+    elem_classes = [sf.ElementTriP1,sf.ElementTriP2,sf.ElementTriP3]
     ucs=[types.SimpleNamespace() for _ in range(len(elem_classes))]
     mp_global=start_mp(nrows=len(elem_classes),ncols=2)
     for row, uc in enumerate(ucs):
@@ -1793,6 +1806,12 @@ vedo_plot_mesh(mcs[0].basis.mesh)
 vedo_plot_mesh(mcs[0].basis.mesh,logging.INFO)
 qtplot(mcs[0])
 qtplot(mcs[1])
+def f1(w):
+    return 1
+o=mcs[0]
+fb=o.basis.boundary()
+f1.assemble(o.basis)
+f1.assemble(fb)
 """
 #%% circle_area
 def circle_area(r=1.0, ntri=32):
