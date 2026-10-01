@@ -472,16 +472,65 @@ class Profile:
             qtplot(uc,scale=-0.1)
         return uc
 
+def get_pts(mesh: sf.Mesh):
+    """
+    Gets points from mesh and adds zero column for z values.
+
+    Parameters
+    ----------
+    mesh : sf.Mesh
+
+    Returns
+    -------
+    numpy.ndarray(n,3)
+    suitable for e.g. vtk plotting
+    """
+    pts = mesh.p.T.copy()
+    if pts.shape[1]==2:
+        z = np.zeros((pts.shape[0],1))
+        pts = np.hstack([pts, z])
+    return pts
+
+def get_facet_points(mesh: sf.Mesh,
+                     rloc: typing.Optional[float]=None):
+    """
+    Gets facet points suitable for e.g. labels
+
+    Parameters
+    ----------
+    mesh : sf.Mesh
+    rloc : relative location [0,1] 0, means at first point of facet
+    1 means at second point of facet.
+
+    Returns
+    -------
+    numpy.ndarray(n,3)
+    suitable for e.g. location of facets using vtk plotting
+
+    for affine mapping and rloc=0.5 oneliner
+    get_pts(mesh).T[:, mesh.facets].mean(axis=1).T
+    or with rloc
+    get_pts(mesh).T[:, mesh.facets].average(axis=1,
+                                            weights=np.array([rloc,1-rloc]).T
+    can be used instead of this routine
+    """
+    pts=get_pts(mesh)
+    fps=np.zeros((mesh.facets.shape[1], 3))
+    for fn in range(mesh.facets.shape[1]):
+        pass
+    #xi = (1.0 - rloc) * xa + rloc * xb
+    # Geometric shape functions at xi
+    #phi = mesh.elem.gbasis(xi)
+    # Global coordinates of the facet point
+    return fps
+
 def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
     from vtk.util.numpy_support import numpy_to_vtk
     vp=start_vp()
     if logger.isEnabledFor(log_level):
         sb=[]
         sb.append(f"vedo_plot_mesh: p{mesh.p.shape}")
-    pts = mesh.p.T.copy()
-    if pts.shape[1]==2:
-        z = np.zeros((pts.shape[0],1))
-        pts = np.hstack([pts, z])
+    pts=get_pts(mesh)
     cells = mesh.dofs.element_dofs.T
     vtk_pts = vtk.vtkPoints()
     vtk_array = numpy_to_vtk(
@@ -552,10 +601,10 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
     render_points_as_spheres=True,
     always_visible=True,
     )
-    facets = pts.T[:, mesh.facets].mean(axis=1).T
+    facet_points = get_facet_points(mesh)
     labels = np.arange(mesh.facets.shape[1])
     vp.add_point_labels(
-    facets,
+    facet_points,
     labels,
     font_size=18,
     text_color="blue",
