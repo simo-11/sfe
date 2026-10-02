@@ -46,6 +46,7 @@ import skfem.io.meshio as skio
 from skfem.models.poisson import laplace
 import matplotlib.pyplot as pyplot
 import math
+import numbers
 import enum
 import types
 import typing
@@ -494,7 +495,7 @@ def get_pts(mesh: sf.Mesh):
 def get_facet_points(mesh: sf.Mesh,
                      rloc: typing.Optional[float]=None):
     """
-    Gets facet points suitable for e.g. labels
+    Gets facet points suitable for e.g. facet labels
 
     Parameters
     ----------
@@ -507,14 +508,27 @@ def get_facet_points(mesh: sf.Mesh,
     numpy.ndarray(n,3)
     suitable for e.g. location of facets using vtk plotting
 
-    for affine mapping and rloc=0.5 oneliner
-    get_pts(mesh).T[:, mesh.facets].mean(axis=1).T
-    or with rloc
-    get_pts(mesh).T[:, mesh.facets].average(axis=1,
-                                            weights=np.array([rloc,1-rloc]).T
-    can be used instead of this routine
+    for affine mapping simpler logic is used
     """
+    if not isinstance(mesh, sf.Mesh):
+        raise TypeError("mesh must be "
+                f"{sf.Mesh.__module__}.{sf.Mesh.__name__},"
+                f" got {type(mesh).__name__}")
+    if rloc!=None:
+        if not isinstance(rloc, numbers.Real):
+            raise TypeError("rloc must be a real number,"
+                        f" got {type(rloc).__name__}")
+        if not (0 <= rloc <= 1):
+            raise ValueError(f"rloc {rloc!r} out of range 0–1")
     pts=get_pts(mesh)
+    map=mesh.mapping()
+    if isinstance(map,sf.MappingAffine):
+        if rloc==0.5 or rloc==None:
+            return pts.T[:, mesh.facets].mean(axis=1).T
+        else:
+            weights=np.array([1-rloc,rloc])
+            vectors=pts.T[:, mesh.facets]
+            return np.average(vectors,axis=1,weights=weights).T
     fps=np.zeros((mesh.facets.shape[1], 3))
     for fn in range(mesh.facets.shape[1]):
         pass
