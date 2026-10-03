@@ -507,8 +507,6 @@ def get_facet_points(mesh: sf.Mesh,
     -------
     numpy.ndarray(n,3)
     suitable for e.g. location of facets using vtk plotting
-
-    for affine mapping simpler logic is used
     """
     if not isinstance(mesh, sf.Mesh):
         raise TypeError("mesh must be "
@@ -520,22 +518,20 @@ def get_facet_points(mesh: sf.Mesh,
                         f" got {type(rloc).__name__}")
         if not (0 <= rloc <= 1):
             raise ValueError(f"rloc {rloc!r} out of range 0–1")
-    pts=get_pts(mesh)
-    map=mesh.mapping()
-    if isinstance(map,sf.MappingAffine):
-        if rloc==0.5 or rloc==None:
-            return pts.T[:, mesh.facets].mean(axis=1).T
-        else:
-            weights=np.array([1-rloc,rloc])
-            vectors=pts.T[:, mesh.facets]
-            return np.average(vectors,axis=1,weights=weights).T
-    fps=np.zeros((mesh.facets.shape[1], 3))
-    for fn in range(mesh.facets.shape[1]):
-        pass
-    #xi = (1.0 - rloc) * xa + rloc * xb
-    # Geometric shape functions at xi
-    #phi = mesh.elem.gbasis(xi)
-    # Global coordinates of the facet point
+    mapping=mesh.mapping()
+    if rloc==None:
+        match mesh.elem.maxdeg:
+            case 1:
+                rloc=0.5
+            case 2:
+                rloc=0.3
+                if mapping.bndelem==None:
+                    mapping.bndelem=sf.ElementLineP2()
+    src=mapping.G(np.array([[rloc]]))
+    x = src[0, :, 0]
+    y = src[1, :, 0]
+    z = np.zeros_like(x)
+    fps = np.column_stack((x, y, z))
     return fps
 
 def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
