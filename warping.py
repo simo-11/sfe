@@ -295,7 +295,7 @@ class MappingCubicLine(sf.Mapping):
 
 
 class ElementLineP3(sf.ElementH1):
-    """Piecewise cubic element."""
+    """Piecewise cubic line element."""
 
     nodal_dofs = 1
     interior_dofs = 2
@@ -522,11 +522,15 @@ def get_facet_points(mesh: sf.Mesh,
     if rloc==None:
         match mesh.elem.maxdeg:
             case 1:
-                rloc=0.5
+                rloc=0.6
             case 2:
-                rloc=0.3
+                rloc=0.6
                 if mapping.bndelem==None:
                     mapping.bndelem=sf.ElementLineP2()
+            case 3:
+                rloc=0.6
+                if mapping.bndelem==None:
+                    mapping.bndelem=ElementLineP3()
     src=mapping.G(np.array([[rloc]]))
     x = src[0, :, 0]
     y = src[1, :, 0]
