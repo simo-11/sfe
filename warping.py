@@ -300,7 +300,7 @@ class ElementLineP3(sf.ElementH1):
     nodal_dofs = 1
     interior_dofs = 2
     maxdeg = 3
-    dofnames = ['u', 'u', 'u']
+    dofnames = ['u', 'u', 'u', 'u']
     doflocs = np.array([[0.],
                         [1.],
                         [1/3],
@@ -308,40 +308,39 @@ class ElementLineP3(sf.ElementH1):
     refdom = sf.refdom.RefLine
 
     def lbasis(self, X, i):
-        # Local coordinate
         x = X[0]
 
         # Node locations
-        x0 = 0.0
-        x1 = 1.0
-        x2 = 1.0 / 3.0
-        x3 = 2.0 / 3.0
+        xs = [0.0, 1.0, 1.0/3.0, 2.0/3.0]
 
-        # Helper: Lagrange basis and derivative
-        def L(x, a, b, c):
-            return ((x - b) * (x - c)) / ((a - b) * (a - c))
+        # Lagrange basis φ_i and derivative dφ_i
+        def phi_and_dphi(x, i):
+            xi = xs[i]
+            num = 1.0
+            dnum = 0.0
+            for j in range(4):
+                if j == i:
+                    continue
+                xj = xs[j]
+                num *= (x - xj)
+            # derivative: sum over k of product excluding k
+            for k in range(4):
+                if k == i:
+                    continue
+                term = 1.0
+                for j in range(4):
+                    if j == i or j == k:
+                        continue
+                    term *= (x - xs[j])
+                dnum += term
+            den = 1.0
+            for j in range(4):
+                if j == i:
+                    continue
+                den *= (xi - xs[j])
+            return num / den, np.array([dnum / den])
 
-        def dL(x, a, b, c):
-            num = (2 * x - b - c)
-            den = ((a - b) * (a - c))
-            return num / den
-
-        if i == 0:
-            phi = L(x, x0, x2, x3)
-            dphi = np.array([dL(x, x0, x2, x3)])
-        elif i == 1:
-            phi = L(x, x1, x2, x3)
-            dphi = np.array([dL(x, x1, x2, x3)])
-        elif i == 2:
-            phi = L(x, x2, x0, x3)
-            dphi = np.array([dL(x, x2, x0, x3)])
-        elif i == 3:
-            phi = L(x, x3, x0, x2)
-            dphi = np.array([dL(x, x3, x0, x2)])
-        else:
-            self._index_error()
-
-        return phi, dphi
+        return phi_and_dphi(x, i)
 
 
 class Profile:
@@ -1753,7 +1752,10 @@ qtplot(ccs[0])
 qtplot(ccs[1])
 """
 #%% manual circle
-def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
+def get_mesh_data_for_circle(elem:sf.ElementTri,
+                             n_elem=None,
+                             r=1,
+                             t_order=1):
     match type(elem):
         case sf.ElementTriP1:
             if n_elem==None:
@@ -1805,15 +1807,26 @@ def get_mesh_data_for_circle(elem:sf.ElementTri, n_elem=None, r=1):
                                                   ,2*np.pi+d_theta,n_elem)
             nodes_in_elem=10
             t=np.zeros((nodes_in_elem,n_elem),dtype=np.int32)
-            t[1,:]=np.r_[1:n_elem+1]
-            t[2,:]=np.r_[2:n_elem+1,1]
-            t[3,:]=np.r_[rs1:rs2]
-            t[4,:]=np.r_[rs2:rs3]
-            t[5,:]=np.r_[rs3:rs4]
-            t[6,:]=np.r_[rs4:rs5]
-            t[7,:]=np.r_[rs1+1:rs2,rs1]
-            t[8,:]=np.r_[rs2+1:rs3,rs2]
-            t[9,:]=np.r_[rs5:rs5+n_elem]
+            match t_order:
+                case 0: # rotate ccw
+                    t[1,:]=np.r_[1:n_elem+1]
+                    t[2,:]=np.r_[2:n_elem+1,1]
+                    t[3,:]=np.r_[rs1:rs2]
+                    t[4,:]=np.r_[rs2:rs3]
+                    t[5,:]=np.r_[rs3:rs4]
+                    t[6,:]=np.r_[rs4:rs5]
+                    t[7,:]=np.r_[rs1+1:rs2,rs1]
+                    t[8,:]=np.r_[rs2+1:rs3,rs2]
+                case 1: # last element cw
+                    t[1,:]=np.r_[1:n_elem,1]
+                    t[2,:]=np.r_[2:n_elem+1,n_elem]
+                    t[3,:]=np.r_[rs1:rs2-1,rs1]
+                    t[4,:]=np.r_[rs2:rs3-1,rs2]
+                    t[5,:]=np.r_[rs3:rs4-1,rs5-1]
+                    t[6,:]=np.r_[rs4:rs5-1,rs4-1]
+                    t[7,:]=np.r_[rs1+1:rs2,rs2-1]
+                    t[8,:]=np.r_[rs2+1:rs3,rs3-1]
+                    t[9,:]=np.r_[rs5:rs5+n_elem]
         case _: raise ValueError((f'Element {type(elem)}'
                                  'not supported'))
     return (doflocs,t)
