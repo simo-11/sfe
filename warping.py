@@ -527,7 +527,7 @@ def get_facet_points(mesh: sf.Mesh,
                 if mapping.bndelem==None:
                     mapping.bndelem=sf.ElementLineP2()
             case 3:
-                rloc=0.6
+                rloc=0.55
                 if mapping.bndelem==None:
                     mapping.bndelem=ElementLineP3()
     src=mapping.G(np.array([[rloc]]))
@@ -1374,11 +1374,15 @@ scale={scale:.4G}, max warping={max_disp:.4G}
 def wrapped_init(self, *args, **kwargs):
     debugpy.breakpoint()
     return globals()['orig_init'](self, *args, **kwargs)
+def no_op(*args, **kwargs):
+    pass
 """
 orig_init = sf.ElementLineP2.__init__
 sf.ElementLineP2.__init__ = wrapped_init
 sf.ElementLineP2.__init__=object.__init__
-
+orig_mesh_post_init=sf.Mesh.__post_init__
+sf.Mesh.__post_init__=no_op
+sf.Mesh.__post_init__=orig_mesh_post_init
 """
 
 def solve_warping(uc):
@@ -1576,12 +1580,12 @@ def refine_uc(src: types.SimpleNamespace,
 def test_elements():
     mp_global = globals().get("mp")
     models=list(Model)
-    models=(Model.RHS,)
+    models=(Model.CIRCLE,)
     if gmsh_plot:
         gmsh_slot=1
     else:
         gmsh_slot=0
-    mesh_scale=1000
+    mesh_scale=1
     if not do_tsplot:
         plt.close('all')
     if not do_qtplot and not gmsh_plot:
