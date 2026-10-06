@@ -539,6 +539,7 @@ def get_facet_points(mesh: sf.Mesh,
 
 def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
     from vtk.util.numpy_support import numpy_to_vtk
+    colors=["cyan","magenta","Yellow","Lime","Orange","Violet","Chartreuse"]
     vp=start_vp()
     if logger.isEnabledFor(log_level):
         sb=[]
@@ -550,10 +551,11 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
         pts, deep=False, array_type=vtk.VTK_FLOAT
     )
     vtk_pts.SetData(vtk_array)
-    ugrid1 = vtk.vtkUnstructuredGrid()
-    ugrid1.SetPoints(vtk_pts)
-    ugrid2 = vtk.vtkUnstructuredGrid()
-    ugrid2.SetPoints(vtk_pts)
+    ugrids=[]
+    for i,color in enumerate(colors):
+        g=vtk.vtkUnstructuredGrid()
+        g.SetPoints(vtk_pts)
+        ugrids.append(g)
     mapping = {
         3: vtk.VTK_TRIANGLE,
         6: vtk.VTK_QUADRATIC_TRIANGLE,
@@ -568,25 +570,19 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
                 vtk_cell[[7, 8]] = vtk_cell[[8, 7]]
             case _:
                 vtk_cell=cell
-        if i%2==0:
-            g=ugrid1
-        else:
-            g=ugrid2
+        g=ugrids[i%len(colors)]
         g.InsertNextCell(ctype, nverts, vtk_cell.astype(np.int64))
     match ctype:
         case vtk.VTK_TRIANGLE:
             pass
         case _:
-            smooth1 = tessellate(pv.UnstructuredGrid(ugrid1))
-            ugrid1=smooth1.cast_to_unstructured_grid()
-            smooth2 = tessellate(pv.UnstructuredGrid(ugrid2))
-            ugrid2=smooth2.cast_to_unstructured_grid()
-    vm1=vedo.Mesh(ugrid1)
-    vm2=vedo.Mesh(ugrid2)
-    vm1.alpha(0.2).c("cyan")
-    vp.add_actor(vm1.actor)
-    vm2.alpha(0.2).c("magenta")
-    vp.add_actor(vm2.actor)
+            for i,color in enumerate(colors):
+                smooth=tessellate(pv.UnstructuredGrid(ugrids[i]))
+                ugrids[i]=smooth.cast_to_unstructured_grid()
+    for i,color in enumerate(colors):
+        vm=vedo.Mesh(ugrids[i])
+        vm.alpha(0.2).c(color)
+        vp.add_actor(vm.actor)
     for i, p in enumerate(mesh.p.T):
         x=mesh.p[0][i]
         y=mesh.p[1][i]
