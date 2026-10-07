@@ -1380,6 +1380,8 @@ orig_mesh_post_init=sf.Mesh.__post_init__
 sf.Mesh.__post_init__=no_op
 sf.Mesh.__post_init__=orig_mesh_post_init
 """
+def mass(u, v, w):
+    return sf.helpers.dot(u, v)
 
 def solve_warping(uc):
     uc.t_basis=sf.Basis(uc.t_mesh, uc.elem,mapping=uc.basis.mapping)
@@ -1392,11 +1394,23 @@ def solve_warping(uc):
         g = x * ny - y * nx
         return g * v
     b = sf.asm(bc, uc.t_basis.boundary())
-    # Fix the constant at random point, scale later
-    D = uc.t_basis.split_indices()[0][[0]]
-    A, b = sf.enforce(A, b,D=D)
+    mass_normalization=True
+    if mass_normalization:
+        u = sf.solve(A, b)
+        M = sf.asm(mass, uc.t_basis)
+        ones = np.ones_like(u)
+        m = (u @ M @ ones) / (ones @ M @ ones)
+        u -= m
+        norm2=u @ M @ u
+        if norm2> 1e-4*uc.sp["area"]:
+            u /= np.sqrt(norm2)
+        uc.S = u
+    else:
+        # Fix the constant at random point, scale later
+        D = uc.t_basis.split_indices()[0][[0]]
+        A, b = sf.enforce(A, b,D=D)
+        uc.S = sf.solve(A, b)
     uc.A=A
-    uc.S = sf.solve(A, b)
 
 def solve_bending(uc):
     p=np.vstack([np.linspace(0,uc.L,uc.b_nelem+1)])
@@ -1428,6 +1442,7 @@ def sp(uc):
         https://sectionproperties.readthedocs.io/
     """
     sp={}
+    uc.sp=sp
     @sf.Functional
     def i_area(w):
       return 1
@@ -1479,7 +1494,6 @@ def sp(uc):
     # optimise order as uc.A is sparse matrix
     sp["j"]=ixx+iyy-(uc.S@(uc.A@uc.S))
     sp["sc"]=[cx+scx,cy+scy]
-    uc.sp=sp
 
 def report_sp(uc):
     if not hasattr(uc,'sp'):
