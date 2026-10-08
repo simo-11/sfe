@@ -980,15 +980,30 @@ def finalize_mesh(uc):
     gmsh.finalize()
     return get_basis(uc,meshio_mesh)
 
-def rect_mesh(uc, h=0.1, b=0.1):
-    """
-    Generates an rectangle
-    """
-    ms=np.sqrt(0.003*uc.elem.refdom.p)*(max(h,b)+3*min(h,b))/4
+def gmsh_init(uc,ms):
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 3)
     gmsh.option.setNumber("Mesh.MeshSizeMin", ms)
     gmsh.option.setNumber("Mesh.MeshSizeMax", ms)
+    match uc.model:
+        case Model.RECTANGLE:
+            pass
+        case _:
+            match uc.elem.maxdeg:
+                case 1:
+                    pass
+                case _:
+                    gmsh.option.setNumber("Mesh.ElementOrder", uc.elem.maxdeg)
+                    gmsh.option.setNumber("Mesh.SecondOrderLinear",0)
+                    gmsh.option.setNumber("Mesh.SecondOrderIncomplete",0)
+                    gmsh.option.setNumber("Mesh.HighOrderOptimize",1)
+
+def rect_mesh(uc, h=0.1, b=0.1):
+    """
+    Generates an rectangle
+    """
+    ms=0.3*uc.elem.maxdeg*(max(h,b)+3*min(h,b))/4
+    gmsh_init(uc,ms)
     gmsh.model.add("rect")
     occ = gmsh.model.occ
     occ.addRectangle(0, 0, 0, b, h)
@@ -1394,7 +1409,7 @@ def solve_warping(uc):
         g = x * ny - y * nx
         return g * v
     b = sf.asm(bc, uc.t_basis.boundary())
-    mass_normalization=True
+    mass_normalization=False
     if mass_normalization:
         u = sf.solve(A, b)
         M = sf.asm(mass, uc.t_basis)
@@ -1587,10 +1602,8 @@ def refine_uc(src: types.SimpleNamespace,
     report_sp(uc)
     return uc
 
-def test_elements():
+def test_elements(models=list(Model)):
     mp_global = globals().get("mp")
-    models=list(Model)
-    models=(Model.CIRCLE,)
     if gmsh_plot:
         gmsh_slot=1
     else:
