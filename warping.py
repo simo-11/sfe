@@ -1520,14 +1520,14 @@ def report_sp(uc):
     m6=scale**6
     print(f'''Section properties for {uc.profile}
   using {uc.name}, {uc.basis.N} DOFs, {uc.basis.X.shape[1]} point integration
-  area={uc.sp['area']/(scale**2):.6G}
-  c=[{uc.sp['c'][0]/scale:.6G},{uc.sp['c'][1]/scale:.6G}]
-  ic=[{uc.sp['ic'][0]/m4:.6G}, \
-  {uc.sp['ic'][1]/m4:.6G}, \
-  {uc.sp['ic'][2]/m4:.6G}]
-  sc=[{uc.sp['sc'][0]/scale:.6G},{uc.sp['sc'][1]/scale:.6G}]
-  gamma={uc.sp['gamma']/m6:.6G}
-  j={uc.sp['j']/m4:.6G}''')
+  area={uc.sp['area']/(scale**2):.4G}
+  c=[{uc.sp['c'][0]/scale:.4G}, {uc.sp['c'][1]/scale:.4G}]
+  ic=[{uc.sp['ic'][0]/m4:.4G},\
+ {uc.sp['ic'][1]/m4:.4G},\
+ {uc.sp['ic'][2]/m4:.4G}]
+  sc=[{uc.sp['sc'][0]/scale:.4G}, {uc.sp['sc'][1]/scale:.4G}]
+  gamma={uc.sp['gamma']/m6:.4G}
+  j={uc.sp['j']/m4:.4G}''')
 
 class Model(enum.Enum):
     SQUARE=1
