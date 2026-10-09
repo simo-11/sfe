@@ -998,11 +998,12 @@ def gmsh_init(uc,ms):
                     gmsh.option.setNumber("Mesh.SecondOrderIncomplete",0)
                     gmsh.option.setNumber("Mesh.HighOrderOptimize",1)
 
-def rect_mesh(uc, h=0.1, b=0.1):
+def rect_mesh(uc, h=0.1, b=0.1, ms=None):
     """
     Generates an rectangle
     """
-    ms=0.3*uc.elem.maxdeg*(max(h,b)+3*min(h,b))/4
+    if ms==None:
+        ms=0.05*uc.elem.maxdeg*(max(h,b)+3*min(h,b))/4
     gmsh_init(uc,ms)
     gmsh.model.add("rect")
     occ = gmsh.model.occ
@@ -1399,7 +1400,7 @@ def mass(u, v, w):
     return sf.helpers.dot(u, v)
 
 def solve_warping(uc):
-    uc.t_basis=sf.Basis(uc.t_mesh, uc.elem,mapping=uc.basis.mapping)
+    uc.t_basis=sf.Basis(uc.t_mesh, uc.elem)
     # Stiffness matrix: ∫ grad(v)·grad(u) dA
     A = sf.asm(laplace, uc.t_basis)
     # boundary condition
@@ -1602,7 +1603,10 @@ def refine_uc(src: types.SimpleNamespace,
     report_sp(uc)
     return uc
 
-def test_elements(models=list(Model)):
+def test_elements(models=list(Model),
+                  etypes=[sf.ElementTriP2],
+                  mesh_sizes=None
+                  ):
     mp_global = globals().get("mp")
     if gmsh_plot:
         gmsh_slot=1
@@ -1617,15 +1621,9 @@ def test_elements(models=list(Model)):
             mp_global=None
     r=gmsh_slot
     c=0
-    mesh_sizes=None
     for model in models:
-        ucs=[
-            types.SimpleNamespace(elem=sf.ElementTriP2()),
-            #types.SimpleNamespace(elem=sf.ElementTriP3()),
-            #types.SimpleNamespace(elem=sf.ElementTriP4()),
-             ]
-        if len(ucs)==1 and model==Model.CIRCLE:
-            mesh_sizes=[1,np.sqrt(1/2),np.sqrt(1/3),0.5]
+        ucs=[types.SimpleNamespace(elem=et()) for et in etypes]
+        if len(ucs)==1 and mesh_sizes!=None and len(mesh_sizes)>1:
             for _ in range(1,len(mesh_sizes)):
                 ucs.append(copy.deepcopy(ucs[0]))
         rows = max(2,math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2))
@@ -1640,7 +1638,7 @@ def test_elements(models=list(Model)):
             if mesh_sizes==None:
                 ms=None
             else:
-                ms=mesh_sizes[row]
+                ms=mesh_scale*mesh_sizes[row]
             fill_uc_defaults(uc)
             try:
                 match model:
@@ -1651,7 +1649,8 @@ def test_elements(models=list(Model)):
                         uc.profile=f'Square {h}'
                         uc.basis = rect_mesh(uc
                                       ,mesh_scale*h
-                                      ,mesh_scale*b)
+                                      ,mesh_scale*b
+                                      ,ms=ms)
                     case Model.CIRCLE:
                         qtplot_scale=-0.3
                         h=1
@@ -1660,14 +1659,15 @@ def test_elements(models=list(Model)):
                         uc.basis = ellipse_mesh(uc
                                       ,mesh_scale*h
                                       ,mesh_scale*b
-                                      ,ms=mesh_scale*ms)
+                                      ,ms=ms)
                     case Model.RECTANGLE:
                         h=0.1
                         b=0.01
                         uc.profile=f'Rectangle {h}x{b}'
                         uc.basis = rect_mesh(uc
                                       ,mesh_scale*h
-                                      ,mesh_scale*b)
+                                      ,mesh_scale*b
+                                      ,ms=ms)
                     case Model.U:
                         h=0.1
                         b=0.05
@@ -1678,7 +1678,8 @@ def test_elements(models=list(Model)):
                                       ,mesh_scale*h
                                       ,mesh_scale*b
                                       ,mesh_scale*t
-                                      ,mesh_scale*ri)
+                                      ,mesh_scale*ri
+                                      ,ms=ms)
                     case Model.RHS:
                         h=0.15
                         b=0.15
@@ -1689,7 +1690,8 @@ def test_elements(models=list(Model)):
                                       ,mesh_scale*h
                                       ,mesh_scale*b
                                       ,mesh_scale*t
-                                      ,mesh_scale*ri)
+                                      ,mesh_scale*ri,
+                                      ms=ms)
                     case _:
                         raise ValueError(f"model {model} is not supported")
                 print(f'Model={uc.model}, nvertices={uc.basis.mesh.nvertices}')
@@ -1728,13 +1730,12 @@ def test_elements(models=list(Model)):
                 if hasattr(uc,'mp'):
                     qtplot(uc)
     return ucs
-
-
-do_tsplot=False
-do_qtplot=True
-do_sp=True
-do_list_entities=False
-gmsh_plot=True
+if globals().get("do_sp")==None:
+    do_tsplot=False
+    do_qtplot=True
+    do_sp=True
+    do_list_entities=False
+    gmsh_plot=True
 #%% test_elements
 """
 ucs=test_elements()
