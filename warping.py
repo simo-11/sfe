@@ -537,7 +537,7 @@ def get_facet_points(mesh: sf.Mesh,
     fps = np.column_stack((x, y, z))
     return fps
 
-def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
+def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG, show_labels=None):
     from vtk.util.numpy_support import numpy_to_vtk
     colors=["cyan","magenta","Yellow","Lime","Orange","Violet","Chartreuse"]
     vp=start_vp()
@@ -545,6 +545,8 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
         sb=[]
         sb.append(f"vedo_plot_mesh: p{mesh.p.shape}")
     pts=get_pts(mesh)
+    if show_labels==None:
+        show_labels=(pts.shape[0]<50)
     cells = mesh.dofs.element_dofs.T
     vtk_pts = vtk.vtkPoints()
     vtk_array = numpy_to_vtk(
@@ -589,38 +591,39 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG):
         if logger.isEnabledFor(log_level):
             txt=f"{i} ({x:.3G},{y:.3G})"
             sb.append(txt)
-    labels = [str(i) for i in range(len(pts))]
-    vp.add_point_labels(
-    pts,
-    labels,
-    font_size=18,
-    text_color="black",
-    point_color="black",
-    render_points_as_spheres=True,
-    always_visible=True,
-    )
-    cell_centers = pts.T[:, mesh.t].mean(axis=1).T
-    labels = np.arange(mesh.t.shape[1])
-    vp.add_point_labels(
-    cell_centers,
-    labels,
-    font_size=18,
-    text_color="white",
-    point_color="white",
-    render_points_as_spheres=True,
-    always_visible=True,
-    )
-    facet_points = get_facet_points(mesh)
-    labels = np.arange(mesh.facets.shape[1])
-    vp.add_point_labels(
-    facet_points,
-    labels,
-    font_size=18,
-    text_color="blue",
-    point_color="blue",
-    render_points_as_spheres=True,
-    always_visible=True,
-    )
+    if show_labels:
+        labels = [str(i) for i in range(len(pts))]
+        vp.add_point_labels(
+        pts,
+        labels,
+        font_size=18,
+        text_color="black",
+        point_color="black",
+        render_points_as_spheres=True,
+        always_visible=True,
+        )
+        cell_centers = pts.T[:, mesh.t].mean(axis=1).T
+        labels = np.arange(mesh.t.shape[1])
+        vp.add_point_labels(
+        cell_centers,
+        labels,
+        font_size=18,
+        text_color="white",
+        point_color="white",
+        render_points_as_spheres=True,
+        always_visible=True,
+        )
+        facet_points = get_facet_points(mesh)
+        labels = np.arange(mesh.facets.shape[1])
+        vp.add_point_labels(
+        facet_points,
+        labels,
+        font_size=18,
+        text_color="blue",
+        point_color="blue",
+        render_points_as_spheres=True,
+        always_visible=True,
+        )
     vp.render()
     if logger.isEnabledFor(log_level):
         sb.append(f"t{mesh.t.shape}")
@@ -983,8 +986,8 @@ def finalize_mesh(uc):
 def gmsh_init(uc,ms):
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 3)
-    gmsh.option.setNumber("Mesh.MeshSizeMin", ms)
-    gmsh.option.setNumber("Mesh.MeshSizeMax", ms)
+    gmsh.option.setNumber("Mesh.MeshSizeMin", 0.5*ms)
+    gmsh.option.setNumber("Mesh.MeshSizeMax", 2*ms)
     match uc.model:
         case Model.RECTANGLE:
             pass
@@ -1003,7 +1006,8 @@ def rect_mesh(uc, h=0.1, b=0.1, ms=None):
     Generates an rectangle
     """
     if ms==None:
-        ms=0.05*uc.elem.maxdeg*(max(h,b)+3*min(h,b))/4
+        m2=uc.elem.maxdeg*uc.elem.maxdeg
+        ms=0.05*m2*(max(h,b)+3*min(h,b))/4
     gmsh_init(uc,ms)
     gmsh.model.add("rect")
     occ = gmsh.model.occ
@@ -1016,12 +1020,9 @@ def ellipse_mesh(uc, rx=0.1, ry=0.1, ms=None):
     Generates an ellipse.
     """
     if ms is None:
-        ms=np.sqrt(0.03*uc.elem.maxdeg)*(max(rx,ry)+3*min(rx,ry))/2
-        ms=2*rx # for testing with very coarce mesh
-    gmsh.initialize()
-    gmsh.option.setNumber("General.Verbosity", 3)
-    gmsh.option.setNumber("Mesh.MeshSizeMin", ms)
-    gmsh.option.setNumber("Mesh.MeshSizeMax", ms)
+        m2=uc.elem.maxdeg*uc.elem.maxdeg
+        ms=0.03*m2*(max(rx,ry)+3*min(rx,ry))/2
+    gmsh_init(uc,ms=ms)
     gmsh.model.add("ellipse")
     occ = gmsh.model.occ
     disk = occ.add_disk(0, 0, 0, 1.0, 1.0)
@@ -1029,12 +1030,14 @@ def ellipse_mesh(uc, rx=0.1, ry=0.1, ms=None):
     occ.synchronize()
     return finalize_mesh(uc)
 
-def rhs_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
+def rhs_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004, ms=None):
     """
     Generates an RHS profile using Boolean operations for 2D rounding.
     """
-    gmsh.initialize()
-    gmsh.option.setNumber("General.Verbosity", 3)
+    if ms is None:
+        m2=uc.elem.maxdeg*uc.elem.maxdeg
+        ms=0.5*m2*t
+    gmsh_init(uc,ms=ms)
     gmsh.model.add("RHS_Profile")
     occ = gmsh.model.occ
 
@@ -1185,6 +1188,7 @@ def get_basis(uc, meshio_mesh):
             cells = meshio_mesh.cells_dict["triangle10"]
             pts = meshio_mesh.points[:, :2].T
             mesh = sf.MeshTri2(pts, cells[:,:3].T)
+            mesh.mapping().bndelem=ElementLineP3()
             mesh.remove_unused_nodes()
             basis = sf.Basis(
                 mesh,
@@ -1244,10 +1248,15 @@ def start_mp(nrows=1, ncols=2,**kwargs):
 
 def start_vp():
     global vp,vp_mp
+    is_health=False
     if "vp" in globals():
-        vp.clear()
-        vp.render()
-    else:
+        try:
+            vp.clear()
+            vp.render()
+            is_health=True
+        except Exception as e:
+            logging.debug(f"vp was not healthy {e}")
+    if not is_health:
         vp_mp = pyvistaqt.MultiPlotter(nrows=1,ncols=1)
         vp=vp_mp[0,0]
         vp.view_xy()
@@ -1401,6 +1410,7 @@ def mass(u, v, w):
 
 def solve_warping(uc):
     uc.t_basis=sf.Basis(uc.t_mesh, uc.elem)
+    uc.t_basis.mesh.mapping().bndelem=uc.basis.mesh.mapping().bndelem
     # Stiffness matrix: ∫ grad(v)·grad(u) dA
     A = sf.asm(laplace, uc.t_basis)
     # boundary condition
