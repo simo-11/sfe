@@ -624,7 +624,7 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG, show_labels=None):
         render_points_as_spheres=True,
         always_visible=True,
         )
-    vp.render()
+    vp.reset_camera(render=True)
     if logger.isEnabledFor(log_level):
         sb.append(f"t{mesh.t.shape}")
         sb.append(str(mesh.t))
@@ -984,6 +984,7 @@ def finalize_mesh(uc):
     return get_basis(uc,meshio_mesh)
 
 def gmsh_init(uc,ms):
+    uc.ms=ms
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", 3)
     gmsh.option.setNumber("Mesh.MeshSizeMin", 0.5*ms)
@@ -1412,7 +1413,9 @@ def mass(u, v, w):
 
 def solve_warping(uc):
     uc.t_basis=sf.Basis(uc.t_mesh, uc.elem)
-    uc.t_basis.mesh.mapping().bndelem=uc.basis.mesh.mapping().bndelem
+    mapping_src=uc.basis.mesh.mapping()
+    if hasattr(mapping_src,'bndelem'):
+        uc.t_basis.mesh.mapping().bndelem=mapping_src.bndelem
     # Stiffness matrix: ∫ grad(v)·grad(u) dA
     A = sf.asm(laplace, uc.t_basis)
     # boundary condition
@@ -1706,7 +1709,9 @@ def test_elements(models=list(Model),
                                       ms=ms)
                     case _:
                         raise ValueError(f"model {model} is not supported")
-                print(f'Model={uc.model}, nvertices={uc.basis.mesh.nvertices}')
+                print(f'Model={uc.model}, '
+                      f'nvertices={uc.basis.mesh.nvertices}, '
+                      f'ms={uc.ms}')
                 if do_tsplot:
                     uc.ax=fig.add_subplot(rows,
                                           2, r * 2 + c + 1,
