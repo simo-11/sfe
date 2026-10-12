@@ -1107,13 +1107,15 @@ def rhs_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004, ms=None):
     gmsh.model.mesh.field.setAsBackgroundMesh(f_thres)
     return finalize_mesh(uc)
 
-def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004):
+def u_mesh(uc, h=0.1, b=0.05, t=0.004, ri=0.004, ms=None):
     """
     Generate a thin-walled U-section with inner corner radius.
     Returns scikit-fem Mesh.
     """
-    gmsh.initialize()
-    gmsh.option.setNumber("General.Verbosity", 3)
+    if ms is None:
+        m2=uc.elem.maxdeg*uc.elem.maxdeg
+        ms=0.5*m2*t
+    gmsh_init(uc,ms=ms)
     gmsh.model.add("u_section")
 # --- Local mesh sizes ---
     lc_radius = 0.5*ri
