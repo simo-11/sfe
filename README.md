@@ -23,9 +23,9 @@ PS C:\> winget install -e --id astral-sh.uv
 
 ## Python
 ```
-C:\> uv python install 3.14.7
-github\scikit-fem [main ≡]> uv venv --clear --python 3.14.7
-Using CPython 3.14.7  
+C:\> uv python install 3.14.8
+github\scikit-fem [main ≡]> uv venv --clear --python 3.14.8
+Using CPython 3.14.8  
 Creating virtual environment at: .venv
 Activate with: .venv\Scripts\activate
 github\scikit-fem [main ≡]> .venv\Scripts\activate
@@ -49,7 +49,7 @@ Dependencies can be installed using pip
  * gmsh - geometry and mesh definitions
  * pyfltk - fltk python bindings
  ** not currently used, gmsh.fltk is used although it blocks spyder console 
- * pyvistaqt pyqt5 - requires pyvista and qtpy
+ * pyvistaqt pyside6 - requires pyvista and qtpy
  * vedo visualization using vtk
  * tqdm - is a Python library that provides a fast, extensible progress bar for loops and other iterable objects
  * mpi4py - message passing library for petsc which does not work with windows
@@ -60,7 +60,7 @@ Dependencies can be installed using pip
 
 Typical command needed after update of python is (uv in front if it is used)
 ```
-uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyqt5 gmsh vedo tqdm
+uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyside6 gmsh vedo tqdm
 ```
 
 # Getting  examples
