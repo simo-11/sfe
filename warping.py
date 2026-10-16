@@ -53,6 +53,8 @@ import typing
 import logging
 import pyvista as pv
 import pyvistaqt
+import sys
+import PySide6.QtWidgets as qtw
 import matplotlib.pyplot as plt
 import gmsh
 import meshio
@@ -132,7 +134,7 @@ LOGGING = {
 }
 logging.config.dictConfig(LOGGING)
 logger = logging.getLogger("sfe")
-logger.info("Starting")
+logger.info(f"Using python {sys.version.split()[0]}")
 
 @dataclasses.dataclass(repr=False)
 class MeshTri3(sf.MeshTri2):
@@ -1226,6 +1228,35 @@ def tsplot(uc):
                          cmap='coolwarm')
     pyplot.pause(0.01)
 
+def grid_positions(nrows, ncols, w=800, h=600, x0=50, y0=50, dx=20, dy=20):
+    # Compute window geometries for a grid layout
+    pos = []
+    for r in range(nrows):
+        for c in range(ncols):
+            x = x0 + c*(w + dx)
+            y = y0 + r*(h + dy)
+            pos.append((x, y, w, h))
+    return pos
+
+
+class MultiViewport(qtw.QWidget):
+    def __init__(self, nrows=1, ncols=2):
+        super().__init__()
+        self.layout = qtw.QGridLayout(self)
+        self.views = []
+        for r in range(nrows):
+            row = []
+            for c in range(ncols):
+                view = pyvistaqt.QtInteractor(self)
+                self.layout.addWidget(view, r, c)
+                row.append(view)
+            self.views.append(row)
+
+    # tuple indexing: win[r,c]
+    def __getitem__(self, idx):
+        r, c = idx
+        return self.views[r][c]
+
 def start_mp(nrows=1, ncols=2,**kwargs):
     global mp
     start_mp=False
@@ -1240,7 +1271,12 @@ def start_mp(nrows=1, ncols=2,**kwargs):
         mp.close()
         start_mp=True
     if start_mp:
-        mp = pyvistaqt.MultiPlotter(**params)
+        app = qtw.QApplication.instance()
+        if app is None:
+            app = qtw.QApplication([])
+        mp = MultiViewport(nrows, ncols)
+        mp.resize(1200, 800)
+        mp.show()
         for i in range(nrows):
             for j in range(ncols):
                 item=mp[i,j]
@@ -1260,7 +1296,7 @@ def start_vp():
         except Exception as e:
             logging.debug(f"vp was not healthy {e}")
     if not is_health:
-        vp_mp = pyvistaqt.MultiPlotter(nrows=1,ncols=1)
+        vp_mp = MultiViewport(nrows=1,ncols=1)
         vp=vp_mp[0,0]
         vp.view_xy()
         vp.camera.up = (0, 1, 0)
