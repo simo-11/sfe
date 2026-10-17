@@ -48,8 +48,8 @@ Dependencies can be installed using pip
  * scikit-fem - main target for this repo, requires numpy and scipy [all] also brings also matplotlib
  * gmsh - geometry and mesh definitions
  * pyfltk - fltk python bindings
- ** not currently used, gmsh.fltk is used although it blocks spyder console 
- * pyvistaqt pyside6 - requires pyvista and qtpy
+   * not currently used, gmsh.fltk can be used although it blocks spyder console 
+ * [pyvistaqt](https://github.com/pyvista/pyvistaqt) [pyside6](https://doc.qt.io/qtforpython-6) - requires(uses) [pyvista](https://docs.pyvista.org) and qtpy
  * vedo visualization using vtk
  * tqdm - is a Python library that provides a fast, extensible progress bar for loops and other iterable objects
  * mpi4py - message passing library for petsc which does not work with windows
