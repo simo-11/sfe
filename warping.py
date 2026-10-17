@@ -1297,11 +1297,13 @@ def start_vp():
             logging.debug(f"vp was not healthy {e}")
     if not is_health:
         vp_mp = MultiViewport(nrows=1,ncols=1)
+        vp_mp.setGeometry(100, 100, 600, 600)
+        vp_mp.show()
         vp=vp_mp[0,0]
+        vp.add_camera_orientation_widget()
         vp.view_xy()
         vp.camera.up = (0, 1, 0)
         vp.reset_camera()
-        vp.show()
     return vp
 
 def mplot(mesh: sf.mesh.Mesh, **fields):
