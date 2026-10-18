@@ -54,12 +54,15 @@ import logging
 import pyvista as pv
 import pyvistaqt
 import sys
+import PySide6
 import PySide6.QtWidgets as qtw
+import matplotlib
 import matplotlib.pyplot as plt
 import gmsh
 import meshio
 import vtk
 import vedo
+import scipy
 import traceback
 import debugpy
 
@@ -134,7 +137,18 @@ LOGGING = {
 }
 logging.config.dictConfig(LOGGING)
 logger = logging.getLogger("sfe")
-logger.info(f"Using python {sys.version.split()[0]}")
+logger.info(f"Using python {sys.version.split()[0]}"
+            f", numpy {np.__version__}"
+            f", scipy {scipy.__version__}"
+            f", skfem {sf.__version__}"
+            f", Qt {PySide6.QtCore.__version__}"
+            f", PySide6 {PySide6.__version__}"
+            f", vtk {vtk.__version__}"
+            f", pyvista {pv.__version__}"
+            f", vedo {vedo.__version__}"
+            f", gmsh {gmsh.__version__}"
+            f", matplotlib {matplotlib.__version__}"
+            )
 
 @dataclasses.dataclass(repr=False)
 class MeshTri3(sf.MeshTri2):
