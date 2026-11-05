@@ -1,11 +1,7 @@
 # sfe
 [scikit-fem](https://github.com/kinnala/scikit-fem) and other examples
  * scikit-fem is a library for performing finite element assembly which provides also for solving small systems
- * petsc - the Portable, Extensible Toolkit for Scientific Computation
- * [taichi](https://www.taichi-lang.org/) provides Productive, portable, and performant GPU programming in Python
-   * taichi does not support latest python versions and taichi-forge does not work out of box, so studies postponed in this context
-   * [taichi](https://github.com/taichi-dev/taichi)
-
+ 
 # Installations
 
 ## [Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/)
