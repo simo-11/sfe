@@ -136,15 +136,9 @@ logger.info(f"Using python {sys.version.split()[0]}"
             f", matplotlib {matplotlib.__version__}"
             )
 
-if globals().get("do_sp")==None:
-    do_tsplot=False
-    do_qtplot=True
-    do_sp=True
-    do_list_entities=False
-    gmsh_plot=True
 #%% test_elements
 """
-ucs=test_elements()
+ucs=cc.test_elements()
 """
 #%% test profile.rhs
 """

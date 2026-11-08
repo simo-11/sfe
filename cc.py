@@ -31,6 +31,12 @@ import copy
 import vedo
 
 logger = logging.getLogger("sfe.cc")
+do_tsplot=False
+do_qtplot=True
+do_sp=True
+do_list_entities=False
+gmsh_plot=True
+
 class Model(enum.Enum):
     SQUARE=1
     RECTANGLE=2
@@ -755,17 +761,18 @@ def tessellate(pv_mesh,max_n_subdivide=3, chord_error=None):
     return smooth_mesh
 
 def finalize_mesh(uc):
+    global gmsh_plot, do_list_entities
     # Mesh Configuration
     if isinstance(uc.elem.refdom,sf.refdom.RefQuad):
         gmsh.option.setNumber("Mesh.RecombineAll", 1)
         gmsh.option.setNumber("Mesh.Algorithm", 8)
     gmsh.option.setNumber("Mesh.ElementOrder", uc.elem.maxdeg)
     gmsh.model.mesh.generate(2)
-    if uc.do_list_entities:
+    if do_list_entities:
         list_entities()
     meshio_mesh = gmsh_to_meshio()
      # --- Optional PyVista plot ---
-    if uc.gmsh_plot and hasattr(uc,'mp'):
+    if gmsh_plot and hasattr(uc,'mp'):
         amp=uc.mp[0,min(uc.elem.maxdeg-1,1)]
         amp.clear()
         amp.add_text(('gmsh mesh for '
@@ -1420,15 +1427,16 @@ def test_elements(models=list(Model),
                   etypes=[sf.ElementTriP2],
                   mesh_sizes=None
                   ):
+    global do_sp, do_qtplot, do_tsplot, gmsh_plot
     mp_global = globals().get("mp")
-    if globals().get("gmsh_plot"):
+    if gmsh_plot:
         gmsh_slot=1
     else:
         gmsh_slot=0
     mesh_scale=1
-    if not globals().get("do_tsplot"):
+    if not do_tsplot:
         plt.close('all')
-    if not globals().get("do_qtplot") and not globals().get("gmsh_plot"):
+    if not do_qtplot and not gmsh_plot:
         if mp_global is not None:
             mp_global.close()
             mp_global=None
@@ -1440,9 +1448,9 @@ def test_elements(models=list(Model),
             for _ in range(1,len(mesh_sizes)):
                 ucs.append(copy.deepcopy(ucs[0]))
         rows = max(2,math.ceil((len(ucs) * (len(models)+gmsh_slot))/ 2))
-        if globals().get("do_qtplot") or globals().get("gmsh_plot"):
+        if do_qtplot or gmsh_plot:
             mp_global=start_mp(nrows=rows)
-        if globals().get("do_tsplot"):
+        if do_tsplot:
             fig = pyplot.figure(num='warping using skfem',clear=True)
             pyplot.tight_layout()
         for row,uc in enumerate(ucs):
@@ -1509,8 +1517,8 @@ def test_elements(models=list(Model),
                         raise ValueError(f"model {model} is not supported")
                 print(f'Model={uc.model}, '
                       f'nvertices={uc.basis.mesh.nvertices}, '
-                      f'ms={uc.ms}')
-                if globals().get("do_tsplot"):
+                      f'ms={uc.ms:.3G}')
+                if do_tsplot:
                     uc.ax=fig.add_subplot(rows,
                                           2, r * 2 + c + 1,
                                           projection="3d")
@@ -1521,16 +1529,15 @@ def test_elements(models=list(Model),
                     r=r+1
                 else:
                     c=1
-                if (globals().get("do_sp") or globals().get("do_qtplot")
-                or globals().get("do_tsplot")):
+                if (do_sp or do_qtplot or do_tsplot):
                     sp(uc)
-                    if globals().get("do_sp"):
+                    if do_sp:
                         report_sp(uc)
                     if np.isnan(uc.S).any():
                         qtplot(uc)
                         print(f'Solution failed for {uc.name}')
                         continue
-                    if globals().get("do_qtplot"):
+                    if do_qtplot:
                         try:
                             qtplot_scale
                         except NameError:
@@ -1538,7 +1545,7 @@ def test_elements(models=list(Model),
                         qtplot(uc,scale=qtplot_scale)
                     print((f'{uc.name}: max_warping ='
                            f' {(uc.S.max()-uc.S.min())/2:.4G}'))
-                    if globals().get("do_tsplot"):
+                    if do_tsplot:
                         tsplot(uc)
             except Exception:
                 print(f'Exception for {uc}')
