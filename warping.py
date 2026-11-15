@@ -51,6 +51,7 @@ import vtk
 import vedo
 import scipy
 import cc
+import pyamg
 
 def reset_logging():
     root = logging.getLogger()
@@ -134,6 +135,7 @@ logger.info(f"Using python {sys.version.split()[0]}"
             f", vedo {vedo.__version__}"
             f", gmsh {gmsh.__version__}"
             f", matplotlib {matplotlib.__version__}"
+            f", pyamg {pyamg.__version__}"
             )
 
 #%% test_elements
