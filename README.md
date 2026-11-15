@@ -43,11 +43,12 @@ Dependencies can be installed using pip
  * spyder-kernels - needed for spyder integration
  * scikit-fem - main target for this repo, requires numpy and scipy [all] also brings also matplotlib
  * gmsh - geometry and mesh definitions
- * pyfltk - fltk python bindings
-   * not currently used, gmsh.fltk can be used although it blocks spyder console 
  * [pyvistaqt](https://github.com/pyvista/pyvistaqt) [pyside6](https://doc.qt.io/qtforpython-6) - requires(uses) [pyvista](https://docs.pyvista.org) and qtpy
  * vedo visualization using vtk
+ * (https://github.com/pyamg/pyamg)[pyamg] library of Algebraic Multigrid (AMG) solvers with a Python interface
  * tqdm - is a Python library that provides a fast, extensible progress bar for loops and other iterable objects
+ * pyfltk - fltk python bindings
+   * not currently used, gmsh.fltk can be used although it blocks spyder console 
  * mpi4py - message passing library for petsc which does not work with windows
  * petsc4py slepc4py - python interfaces for petsc
  ** does not work 
@@ -56,7 +57,7 @@ Dependencies can be installed using pip
 
 Typical command needed after update of python is (uv in front if it is used)
 ```
-uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyside6 gmsh vedo tqdm
+uv pip install spyder-kernels==3.1.* scikit-fem[all] pyvistaqt pyside6 gmsh vedo tqdm pyamg
 ```
 
 # Getting  examples
