@@ -29,6 +29,7 @@ import pyvista as pv
 import vtk
 import copy
 import vedo
+import pyamg
 
 logger = logging.getLogger("sfe.cc")
 do_tsplot=False
@@ -1687,4 +1688,7 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG, show_labels=None):
         sb.append(str(mesh.facets))
         logger.log(log_level,"\n".join(sb))
 
-
+def amg_solve(A,b,**kwargs):
+    ml = pyamg.ruge_stuben_solver(A)
+    x = ml.solve(b,**kwargs)
+    return x,ml
