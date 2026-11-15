@@ -1688,7 +1688,8 @@ def vedo_plot_mesh(mesh: sf.Mesh,log_level=logging.DEBUG, show_labels=None):
         sb.append(str(mesh.facets))
         logger.log(log_level,"\n".join(sb))
 
-def amg_solve(A,b,**kwargs):
+def amg_solve(A,b,x,I,**kwargs):
     ml = pyamg.ruge_stuben_solver(A)
-    x = ml.solve(b,**kwargs)
-    return x,ml
+    y = x.copy()
+    y[I]=pyamg.solve(A,b,**kwargs)
+    return y,ml
