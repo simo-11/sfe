@@ -32,10 +32,10 @@ import vedo
 
 logger = logging.getLogger("sfe.cc")
 do_tsplot=False
-do_qtplot=True
+do_qtplot=False
 do_sp=True
 do_list_entities=False
-gmsh_plot=True
+gmsh_plot=False
 
 class Model(enum.Enum):
     SQUARE=1
