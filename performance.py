@@ -5,6 +5,7 @@ is used to generate the table in README.md.
 
 """
 import time
+import types
 import cc
 import itertools
 import numpy as np
@@ -26,27 +27,31 @@ print('| --- | --- | --- | --- | --- | --- | --- |')
 
 do_amg_solve=False
 ma=[]
-for k in itertools.chain((2,),range(2, 6)):
-    t=[]
-    m = pre(int(2 ** k))
-    t.append(time.perf_counter())
-    A, b = assembler(m)
-    D = m.boundary_nodes()
-    t.append(time.perf_counter())
-    AII, bI, xD, I = sf.condense(A, b, D=D)
-    t.append(time.perf_counter())
-    ua=[]
-    r=[]#residuals
-    u=sf.solve(AII, bI, xD, I)
-    t.append(time.perf_counter())
-    ua.append(u)
-    u,m=cc.amg_solve(AII, bI, xD, I,verb=False)
-    ma.append(m)
-    t.append(time.perf_counter())
-    ua.append(u)
-    for u in ua:
-        r.append(np.linalg.norm(b-A@u)/np.linalg.norm(b))
-    print((f'| {len(b)} | {t[1]-t[0]:.5f} | {t[2]-t[1]:.5f} |'
-          f' {t[3]-t[2]:.5f} | {r[0]:1.3G} |'
-          f' {t[4]-t[3]:.5f} | {r[1]:1.3G} |'
+for k in itertools.chain((10,),range(10, 23, 3)):
+    ns=types.SimpleNamespace()
+    ns.t=[]
+    ns.m = pre(k)
+    ns.t.append(time.perf_counter())
+    ns.A, ns.b = assembler(ns.m)
+    ns.D = ns.m.boundary_nodes()
+    ns.t.append(time.perf_counter())
+    ns.AII, ns.bI, ns.xD, ns.I = sf.condense(ns.A, ns.b, D=ns.D)
+    ns.t.append(time.perf_counter())
+    ns.ua=[]
+    ns.r=[]#residuals
+    u=sf.solve(ns.AII, ns.bI, ns.xD, ns.I)
+    ns.t.append(time.perf_counter())
+    ns.ua.append(u)
+    u,ns.ml=cc.amg_solve(ns.AII, ns.bI, ns.xD, ns.I,
+                     return_solver=True,
+                     verb=False)
+    ma.append(ns)
+    ns.t.append(time.perf_counter())
+    ns.ua.append(u)
+    for u in ns.ua:
+        r = np.linalg.norm(ns.bI - ns.AII @ u[ns.I]) / np.linalg.norm(ns.bI)
+        ns.r.append(r)
+    print((f'| {len(ns.b)} | {ns.t[1]-ns.t[0]:.5f} | {ns.t[2]-ns.t[1]:.5f} |'
+          f' {ns.t[3]-ns.t[2]:.5f} | {ns.r[0]:1.3G} |'
+          f' {ns.t[4]-ns.t[3]:.5f} | {ns.r[1]:1.3G} |'
           ))
